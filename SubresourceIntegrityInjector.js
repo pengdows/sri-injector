@@ -1,68 +1,56 @@
 const fs = require('fs-extra')
 const crypto = require('crypto')
 const path = require('path')
+const HashAlgos = require('./HashAlgo');
 
 class SubresourceIntegrityInjector {
-  computeSRI (filePath, algorithm = 'sha384') {
-    const fileBuffer = fs.readFileSync(filePath)
-    const hashSum = crypto.createHash(algorithm)
-    hashSum.update(fileBuffer)
 
-    const base64Hash = hashSum.digest('base64')
-    return `${algorithm}-${base64Hash}`
+  validateHashName (algorithmName) {
+
+    const selectedAlgorithm = HashAlgos[algorithmName] || 'sha384'
+    return selectedAlgorithm
   }
 
-  updateHtmlTag (match, outputDir, algorithm, htmlContent) {
-    const tagName = match[1]
-    const attributesBefore = match[2]
-    const urlType = match[3]
-    const url = match[4]
-    const attributesAfter = match[5]
-
-    if (!url.startsWith('http')) {
-      const resourceFilePath = path.join(outputDir, url)
-
-      if (fs.existsSync(resourceFilePath)) {
-        const sriHash = this.computeSRI(resourceFilePath, algorithm)
-        const newTag = `<${tagName}${attributesBefore}${urlType}="${url}" integrity="${sriHash}" crossorigin="anonymous"${attributesAfter}/>`
-
-        htmlContent = htmlContent.replace(match[0], newTag)
-      }
-    }
-    return htmlContent
+  replaceTags (htmlContent, tag, attribute) {
+    const regex = new RegExp(`<${tag}[^>]* ${attribute}="([^"]+)"( /)?>`, 'g')
+    return htmlContent.replace(regex, (match, src, selfClose) => {
+      const content = fs.readFileSync(path.join(this.outputDir, src))
+      const integrity = this.calculateHash(content)
+      return `<${tag} ${attribute}="${src}" integrity="${this.algorithm}-${integrity}" crossorigin="anonymous"${selfClose || ''}>`
+    })
   }
+
+  // Function to calculate hash for Subresource Integrity
+   calculateHash (content){
+    const hash = crypto.createHash(this.algorithm);
+    hash.update(content);
+    return hash.digest(this.algorithm);
+  };
 
   insertSRIInHTML (outputDir, algorithm = 'sha384') {
+    this.outputDir = outputDir
+    this.algorithm = this.validateHashName(algorithm)
     const p = new Promise((resolve, reject) => {
-
-      const htmlFilePath = path.join(outputDir, 'index.html')
-
-      if (!fs.existsSync(htmlFilePath)) {
-        const errorText = 'index.html not found in output directory'
-        //console.error(errorText);
-        reject(errorText)
-        return
-      }
-
-      let htmlContent = fs.readFileSync(htmlFilePath, 'utf8')
-
-      // Regex to match link, script, and img tags
-      const regex = /<(link|script|img)([^>]*)(href|src)="([^"]+)"([^>]*)>/g
-      let match
-
-      while ((match = regex.exec(htmlContent)) !== null) {
-        htmlContent = this.updateHtmlTag(match, outputDir, algorithm, htmlContent)
-      }
       try {
+        const htmlFilePath = path.join(outputDir, 'index.html')
+
+        if (!fs.existsSync(htmlFilePath)) {
+          throw new Error('index.html not found')
+        }
+        let htmlContent = fs.readFileSync(htmlFilePath, 'utf8')
+
+        htmlContent = this.replaceTags(htmlContent, 'script', 'src')
+        htmlContent = this.replaceTags(htmlContent, 'link', 'href')
+        // Save updated HTML
         fs.writeFileSync(htmlFilePath, htmlContent)
         resolve()
       } catch (e) {
         reject(e)
       }
-    })
-    return p
-  }
 
+    });
+    return p;
+  }
 }
 
 module.exports = SubresourceIntegrityInjector

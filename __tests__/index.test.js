@@ -8,8 +8,7 @@ const HTML_FILE = path.join(TEST_DIR, 'index.html');
 beforeAll(() => {
   // Create a test directory and an index.html file
   fs.removeSync(TEST_DIR);
-  fs.ensureDirSync(TEST_DIR, {});
-  // Create a sample JS file
+  fs.ensureDirSync(TEST_DIR);
   const jsContent = 'console.log("hello world");';
   const jsPath = path.join(TEST_DIR, 'test.js');
   fs.writeFileSync(jsPath, jsContent);
@@ -18,7 +17,7 @@ beforeAll(() => {
 
 afterAll(() => {
   // Clean up after tests are done
-  //fs.removeSync(TEST_DIR);
+  fs.removeSync(TEST_DIR);
 });
 
 test('insertSRIInHTML should add SRI attributes', async () => {
