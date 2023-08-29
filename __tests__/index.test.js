@@ -12,7 +12,7 @@ beforeAll(() => {
   const jsContent = 'console.log("hello world");';
   const jsPath = path.join(TEST_DIR, 'test.js');
   fs.writeFileSync(jsPath, jsContent);
-  fs.writeFileSync(HTML_FILE, '<html><head><script src="test.js"></script></head><body></body></html>');
+  fs.writeFileSync(HTML_FILE, '<html><head><link rel="canonical" href="test.js"/><script src="test.js"></script></head><body></body></html>');
 });
 
 afterAll(() => {
@@ -32,4 +32,16 @@ test('insertSRIInHTML should add SRI attributes', async () => {
     console.log("error");
   });
 });
+test('insertSRIInHTML should add SRI attributes for link', async () => {
 
+  const s = new SubresourceIntegrityInjector();
+  await s.insertSRIInHTML(TEST_DIR).then(()=>{
+    const updatedHtmlContent = fs.readFileSync(HTML_FILE, 'utf-8');
+
+    // Check if integrity attribute has been added to the script tag
+    expect(updatedHtmlContent).toMatch(/<link src="test\.js" integrity="[^"]+" crossorigin="anonymous"\/>/);
+  }).catch((error)=>{
+    console.log("error");
+    throw error;
+  });
+});
