@@ -122,9 +122,11 @@ describe('external (CDN) resources', () => {
   let server;
   let baseUrl;
   let requestLog;
+  let flakyShouldFail;
 
   beforeAll(async () => {
     requestLog = [];
+    flakyShouldFail = false;
     server = await startTestServer((req, res) => {
       requestLog.push(req.url);
       if (req.url === '/lib.js') {
@@ -142,6 +144,16 @@ describe('external (CDN) resources', () => {
         res.end('not found');
         return;
       }
+      if (req.url === '/flaky.js') {
+        if (flakyShouldFail) {
+          res.writeHead(503);
+          res.end('temporarily unavailable');
+          return;
+        }
+        res.writeHead(200, { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/javascript' });
+        res.end('console.log("flaky");');
+        return;
+      }
       res.writeHead(500);
       res.end('unexpected');
     });
@@ -152,6 +164,7 @@ describe('external (CDN) resources', () => {
 
   beforeEach(() => {
     requestLog.length = 0;
+    flakyShouldFail = false;
   });
 
   test('fetches an external resource and computes its integrity value', async () => {
@@ -251,6 +264,62 @@ describe('external (CDN) resources', () => {
     expect(report.processed).toHaveLength(2);
     expect(requestLog.filter((u) => u === '/lib.js')).toHaveLength(1);
   });
+
+  test('a successful fetch records an entry in the lock file', async () => {
+    const dir = freshDir('lock-record');
+    const lockFilePath = path.join(dir, 'sri-lock.json');
+    fs.writeFileSync(
+      path.join(dir, 'index.html'),
+      `<html><head><script src="${baseUrl}/lib.js"></script></head><body></body></html>`
+    );
+
+    const injector = new SubresourceIntegrityInjector({ lockFilePath });
+    await injector.insertSRIInFile(path.join(dir, 'index.html'), dir);
+
+    expect(fs.existsSync(lockFilePath)).toBe(true);
+    const lock = JSON.parse(fs.readFileSync(lockFilePath, 'utf8'));
+    const key = `sha384::${baseUrl}/lib.js`;
+    expect(lock.entries[key].integrity).toBe(hashOf('sha384', 'console.log("from cdn");'));
+  });
+
+  test('a later fetch failure falls back to the cached lock-file hash instead of failing', async () => {
+    const dir = freshDir('lock-fallback');
+    const lockFilePath = path.join(dir, 'sri-lock.json');
+    fs.writeFileSync(
+      path.join(dir, 'index.html'),
+      `<html><head><script src="${baseUrl}/flaky.js"></script></head><body></body></html>`
+    );
+
+    const firstInjector = new SubresourceIntegrityInjector({ lockFilePath });
+    const firstReport = await firstInjector.insertSRIInFile(path.join(dir, 'index.html'), dir);
+    const goodIntegrity = firstReport.processed[0].integrity;
+
+    flakyShouldFail = true;
+    const secondInjector = new SubresourceIntegrityInjector({ lockFilePath });
+    const secondReport = await secondInjector.insertSRIInFile(path.join(dir, 'index.html'), dir);
+
+    expect(secondReport.errors).toHaveLength(0);
+    expect(secondReport.processed).toHaveLength(1);
+    expect(secondReport.processed[0].usedCachedHash).toBe(true);
+    expect(secondReport.processed[0].integrity).toBe(goodIntegrity);
+    expect(secondReport.warnings[0].warning).toMatch(/Fetch failed/);
+  });
+
+  test('a fetch failure with no prior lock entry is still a hard error', async () => {
+    const dir = freshDir('lock-no-fallback');
+    const lockFilePath = path.join(dir, 'sri-lock.json');
+    flakyShouldFail = true;
+    fs.writeFileSync(
+      path.join(dir, 'index.html'),
+      `<html><head><script src="${baseUrl}/flaky.js"></script></head><body></body></html>`
+    );
+
+    const injector = new SubresourceIntegrityInjector({ lockFilePath });
+    const report = await injector.insertSRIInFile(path.join(dir, 'index.html'), dir);
+
+    expect(report.processed).toHaveLength(0);
+    expect(report.errors).toHaveLength(1);
+  });
 });
 
 test('collects a missing local file as an error and keeps processing other tags', async () => {
@@ -341,3 +410,4 @@ test('CLI exits non-zero and prints usage when --dir is missing', () => {
   const cliPath = path.join(__dirname, '..', 'bin', 'cli.js');
   expect(() => execFileSync('node', [cliPath], { encoding: 'utf8' })).toThrow();
 });
+

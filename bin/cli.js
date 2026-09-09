@@ -10,6 +10,7 @@ function parseArgs(argv) {
         fetchExternal: true,
         defaultProtocol: 'https:',
         fetchTimeoutMs: 10000,
+        lockFilePath: null,
         help: false,
     }
     for (let i = 0; i < argv.length; i++) {
@@ -35,6 +36,9 @@ function parseArgs(argv) {
             case '--timeout':
                 args.fetchTimeoutMs = parseInt(argv[++i], 10)
                 break
+            case '--lock-file':
+                args.lockFilePath = argv[++i]
+                break
             case '--help':
             case '-h':
                 args.help = true
@@ -59,6 +63,8 @@ Options:
   --no-fetch-external       Do not fetch external (CDN) resources to hash them; skip them instead
   --default-protocol <p>    Protocol used to resolve protocol-relative URLs, e.g. "//cdn..." (default: https:)
   --timeout <ms>            Timeout for fetching an external resource (default: 10000)
+  --lock-file <path>        Persist external resource hashes here across runs; a fetch failure falls
+                             back to the last recorded hash instead of failing the build (optional)
   -h, --help                Show this help message
 `)
 }
@@ -87,6 +93,7 @@ async function main() {
             fetchExternal: args.fetchExternal,
             defaultProtocol: args.defaultProtocol,
             fetchTimeoutMs: args.fetchTimeoutMs,
+            lockFilePath: args.lockFilePath,
         })
     } catch (e) {
         console.error(e.message)
@@ -94,8 +101,15 @@ async function main() {
         return
     }
 
-    const outputDir = path.resolve(process.cwd(), args.dir)
-    const report = await injector.insertSRIInDirectory(outputDir)
+    let report
+    try {
+        const outputDir = path.resolve(process.cwd(), args.dir)
+        report = await injector.insertSRIInDirectory(outputDir)
+    } catch (e) {
+        console.error(e.message)
+        process.exitCode = 1
+        return
+    }
 
     console.log(`Processed ${report.processed.length} resource(s).`)
     if (report.skipped.length > 0) {

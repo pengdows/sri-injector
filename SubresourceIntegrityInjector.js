@@ -35,6 +35,14 @@ class SubresourceIntegrityInjector {
         this.fetchExternal = options.fetchExternal ?? true
         this.defaultProtocol = options.defaultProtocol ?? 'https:'
         this.fetchTimeoutMs = options.fetchTimeoutMs ?? 10000
+        // Persists last-known-good hashes for external resources across runs,
+        // keyed by algorithm+URL. When a fetch fails and a cached entry
+        // exists, that hash is used instead of failing the whole build --
+        // the browser is still protected by a real previously-verified hash,
+        // just not this run's freshest one.
+        this.lockFilePath = options.lockFilePath ? path.resolve(options.lockFilePath) : null
+        this._lock = null
+        this._lockDirty = false
         this._externalCache = new Map()
     }
 
@@ -86,6 +94,7 @@ class SubresourceIntegrityInjector {
         if (report.processed.length > 0) {
             await fs.writeFile(htmlFilePath, root.toString())
         }
+        await this._saveLockIfDirty()
         return report
     }
 
@@ -141,17 +150,39 @@ class SubresourceIntegrityInjector {
         }
 
         const url = src.startsWith('//') ? `${this.defaultProtocol}${src}` : src
+        await this._ensureLockLoaded()
+        const lockKey = this._lockKey(url)
+        const cached = this.lockFilePath ? this._lock.entries[lockKey] : null
 
         let result
         try {
             result = await this._fetchExternalContent(url)
         } catch (e) {
+            if (cached) {
+                el.setAttribute('integrity', cached.integrity)
+                el.setAttribute('crossorigin', this.crossorigin)
+                report.processed.push({ src, url, integrity: cached.integrity, external: true, usedCachedHash: true })
+                report.warnings.push({
+                    src,
+                    url,
+                    warning:
+                        `Fetch failed (${e.message}); used a cached integrity value from ${this.lockFilePath} ` +
+                        `last recorded ${cached.fetchedAt}. Re-run once the resource is reachable to refresh it.`,
+                })
+                return
+            }
             report.errors.push({ src, url, error: e.message })
             return
         }
 
         this._applyIntegrity(el, result.content)
-        report.processed.push({ src, url, integrity: el.getAttribute('integrity'), external: true })
+        const integrity = el.getAttribute('integrity')
+        report.processed.push({ src, url, integrity, external: true })
+
+        if (this.lockFilePath) {
+            this._lock.entries[lockKey] = { integrity, fetchedAt: new Date().toISOString() }
+            this._lockDirty = true
+        }
 
         if (!result.hasCorsHeader) {
             report.warnings.push({
@@ -164,6 +195,36 @@ class SubresourceIntegrityInjector {
                     'Consider self-hosting this resource instead.',
             })
         }
+    }
+
+    _lockKey(url) {
+        return `${this.algorithm}::${url}`
+    }
+
+    async _ensureLockLoaded() {
+        if (!this.lockFilePath || this._lock) {
+            return
+        }
+        try {
+            const raw = await fs.readFile(this.lockFilePath, 'utf8')
+            this._lock = JSON.parse(raw)
+        } catch (e) {
+            if (e.code !== 'ENOENT') {
+                throw new Error(`Failed to read lock file ${this.lockFilePath}: ${e.message}`)
+            }
+            this._lock = { entries: {} }
+        }
+        if (!this._lock.entries) {
+            this._lock.entries = {}
+        }
+    }
+
+    async _saveLockIfDirty() {
+        if (!this.lockFilePath || !this._lockDirty) {
+            return
+        }
+        await fs.writeFile(this.lockFilePath, JSON.stringify(this._lock, null, 2) + '\n')
+        this._lockDirty = false
     }
 
     _applyIntegrity(el, content) {
