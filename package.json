@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Injects Subresource Integrity (integrity/crossorigin) attributes into script/link tags across a build tool's HTML output.",
   "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
   "bin": {
     "sri-injector": "./bin/cli.js"
   },

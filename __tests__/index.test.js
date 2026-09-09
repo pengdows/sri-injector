@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
 const crypto = require('crypto');
+const http = require('http');
 const { execFileSync } = require('child_process');
 const SubresourceIntegrityInjector = require('../SubresourceIntegrityInjector');
 
@@ -15,6 +16,19 @@ function freshDir(name) {
 
 function hashOf(algorithm, content) {
   return `${algorithm}-${crypto.createHash(algorithm).update(content).digest('base64')}`;
+}
+
+// Stands in for a CDN: serves fixed content over plain HTTP on localhost so
+// external-resource tests are deterministic and need no real network access.
+function startTestServer(handler) {
+  return new Promise((resolve) => {
+    const server = http.createServer(handler);
+    server.listen(0, '127.0.0.1', () => resolve(server));
+  });
+}
+
+function stopTestServer(server) {
+  return new Promise((resolve) => server.close(resolve));
 }
 
 afterAll(() => {
@@ -88,24 +102,155 @@ test('only injects into link tags whose rel is SRI-relevant', async () => {
   expect(updated).not.toMatch(/rel="icon"[^>]*integrity/);
 });
 
-test('skips external and data URLs without touching the filesystem for them', async () => {
-  const dir = freshDir('external-urls');
+test('skips data: URIs without any fetch or filesystem access', async () => {
+  const dir = freshDir('data-uri');
   fs.writeFileSync(
     path.join(dir, 'index.html'),
-    '<html><head>' +
-      '<script src="https://cdn.example.com/lib.js"></script>' +
-      '<script src="//cdn.example.com/other.js"></script>' +
-      '<script src="data:text/javascript,console.log(1)"></script>' +
-      '</head><body></body></html>'
+    '<html><head><script src="data:text/javascript,console.log(1)"></script></head><body></body></html>'
   );
 
   const injector = new SubresourceIntegrityInjector();
   const report = await injector.insertSRIInFile(path.join(dir, 'index.html'), dir);
 
   expect(report.errors).toHaveLength(0);
-  expect(report.skippedExternal).toHaveLength(3);
+  expect(report.skipped).toEqual([{ src: 'data:text/javascript,console.log(1)', reason: 'data-uri' }]);
   const updated = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
   expect(updated).not.toContain('integrity=');
+});
+
+describe('external (CDN) resources', () => {
+  let server;
+  let baseUrl;
+  let requestLog;
+
+  beforeAll(async () => {
+    requestLog = [];
+    server = await startTestServer((req, res) => {
+      requestLog.push(req.url);
+      if (req.url === '/lib.js') {
+        res.writeHead(200, { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/javascript' });
+        res.end('console.log("from cdn");');
+        return;
+      }
+      if (req.url === '/no-cors.js') {
+        res.writeHead(200, { 'Content-Type': 'application/javascript' });
+        res.end('console.log("no cors headers");');
+        return;
+      }
+      if (req.url === '/missing.js') {
+        res.writeHead(404);
+        res.end('not found');
+        return;
+      }
+      res.writeHead(500);
+      res.end('unexpected');
+    });
+    baseUrl = `http://127.0.0.1:${server.address().port}`;
+  });
+
+  afterAll(() => stopTestServer(server));
+
+  beforeEach(() => {
+    requestLog.length = 0;
+  });
+
+  test('fetches an external resource and computes its integrity value', async () => {
+    const dir = freshDir('external-fetch');
+    fs.writeFileSync(
+      path.join(dir, 'index.html'),
+      `<html><head><script src="${baseUrl}/lib.js"></script></head><body></body></html>`
+    );
+
+    const injector = new SubresourceIntegrityInjector();
+    const report = await injector.insertSRIInFile(path.join(dir, 'index.html'), dir);
+
+    expect(report.errors).toHaveLength(0);
+    expect(report.processed).toHaveLength(1);
+    expect(report.processed[0].external).toBe(true);
+    expect(report.processed[0].integrity).toBe(hashOf('sha384', 'console.log("from cdn");'));
+    const updated = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+    expect(updated).toContain(`integrity="${hashOf('sha384', 'console.log("from cdn");')}"`);
+    expect(updated).toContain('crossorigin="anonymous"');
+  });
+
+  test('resolves protocol-relative URLs using defaultProtocol', async () => {
+    const dir = freshDir('external-protocol-relative');
+    const port = server.address().port;
+    fs.writeFileSync(
+      path.join(dir, 'index.html'),
+      `<html><head><script src="//127.0.0.1:${port}/lib.js"></script></head><body></body></html>`
+    );
+
+    const injector = new SubresourceIntegrityInjector({ defaultProtocol: 'http:' });
+    const report = await injector.insertSRIInFile(path.join(dir, 'index.html'), dir);
+
+    expect(report.errors).toHaveLength(0);
+    expect(report.processed).toHaveLength(1);
+    expect(report.processed[0].url).toBe(`http://127.0.0.1:${port}/lib.js`);
+  });
+
+  test('warns when the external response lacks CORS headers', async () => {
+    const dir = freshDir('external-no-cors');
+    fs.writeFileSync(
+      path.join(dir, 'index.html'),
+      `<html><head><script src="${baseUrl}/no-cors.js"></script></head><body></body></html>`
+    );
+
+    const injector = new SubresourceIntegrityInjector();
+    const report = await injector.insertSRIInFile(path.join(dir, 'index.html'), dir);
+
+    expect(report.processed).toHaveLength(1);
+    expect(report.warnings).toHaveLength(1);
+    expect(report.warnings[0].warning).toMatch(/Access-Control-Allow-Origin/);
+  });
+
+  test('collects an HTTP error response as an error, not a crash', async () => {
+    const dir = freshDir('external-404');
+    fs.writeFileSync(
+      path.join(dir, 'index.html'),
+      `<html><head><script src="${baseUrl}/missing.js"></script></head><body></body></html>`
+    );
+
+    const injector = new SubresourceIntegrityInjector();
+    const report = await injector.insertSRIInFile(path.join(dir, 'index.html'), dir);
+
+    expect(report.processed).toHaveLength(0);
+    expect(report.errors).toHaveLength(1);
+    expect(report.errors[0].error).toMatch(/404/);
+  });
+
+  test('fetchExternal: false skips external resources without making a request', async () => {
+    const dir = freshDir('external-fetch-disabled');
+    fs.writeFileSync(
+      path.join(dir, 'index.html'),
+      `<html><head><script src="${baseUrl}/lib.js"></script></head><body></body></html>`
+    );
+
+    const injector = new SubresourceIntegrityInjector({ fetchExternal: false });
+    const report = await injector.insertSRIInFile(path.join(dir, 'index.html'), dir);
+
+    expect(report.errors).toHaveLength(0);
+    expect(report.processed).toHaveLength(0);
+    expect(report.skipped).toEqual([{ src: `${baseUrl}/lib.js`, reason: 'fetch-disabled' }]);
+    expect(requestLog).toHaveLength(0);
+  });
+
+  test('caches repeated requests to the same external URL within one run', async () => {
+    const dir = freshDir('external-cache');
+    fs.writeFileSync(
+      path.join(dir, 'index.html'),
+      `<html><head>` +
+        `<script src="${baseUrl}/lib.js"></script>` +
+        `<link rel="preload" as="script" href="${baseUrl}/lib.js">` +
+        `</head><body></body></html>`
+    );
+
+    const injector = new SubresourceIntegrityInjector();
+    const report = await injector.insertSRIInFile(path.join(dir, 'index.html'), dir);
+
+    expect(report.processed).toHaveLength(2);
+    expect(requestLog.filter((u) => u === '/lib.js')).toHaveLength(1);
+  });
 });
 
 test('collects a missing local file as an error and keeps processing other tags', async () => {
