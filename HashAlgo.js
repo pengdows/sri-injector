@@ -1,5 +1,5 @@
-const HashAlgo = (()=> {
-  function createEnum (values) {
+const HashAlgo = (() => {
+  function createEnum(values) {
     const enumObject = {};
     for (const val of values) {
       enumObject[val] = val;
@@ -7,6 +7,6 @@ const HashAlgo = (()=> {
     return Object.freeze(enumObject);
   }
 
-  return createEnum(['sha384', 'sha512']);
+  return createEnum(['sha256', 'sha384', 'sha512']);
 })();
 module.exports = HashAlgo;

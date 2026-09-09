@@ -1,19 +1,23 @@
 {
   "name": "sri-injector",
   "version": "1.0.0",
-  "description": "",
+  "description": "Injects Subresource Integrity (integrity/crossorigin) attributes into script/link tags across a build tool's HTML output.",
   "main": "index.js",
+  "bin": {
+    "sri-injector": "./bin/cli.js"
+  },
   "scripts": {
     "test": "jest",
-    "run": "node src/index.js"
+    "run": "node bin/cli.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "fs-extra": "^11.1.1"
+    "node-html-parser": "^9.0.4"
   },
   "devDependencies": {
+    "fs-extra": "^11.1.1",
     "jest": "^29.6.4"
   }
 }

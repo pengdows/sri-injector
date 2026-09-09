@@ -1,7 +1,9 @@
-
 const HashAlgo = require('../HashAlgo');
-test('it should exist and have properties',()=>{
-  const arr = Object.getOwnPropertyNames(HashAlgo);
-  expect(arr).toBeDefined();
-  expect(arr.length).toBeGreaterThan(0);
+
+test('exposes exactly the SRI-legal algorithms', () => {
+  expect(Object.keys(HashAlgo).sort()).toEqual(['sha256', 'sha384', 'sha512']);
+});
+
+test('is frozen', () => {
+  expect(Object.isFrozen(HashAlgo)).toBe(true);
 });
