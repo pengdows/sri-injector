@@ -7,6 +7,6 @@ const HashAlgo = (()=> {
     return Object.freeze(enumObject);
   }
 
-  return createEnum(['sha384', 'sha512']);
+  return createEnum(['sha256', 'sha384', 'sha512']);
 })();
 module.exports = HashAlgo;
