@@ -1,6 +1,7 @@
 const path = require('path')
 const { injectSri, toFilePath, isInsideDir, normalizeBase, relativeToBase, isExternal, calculateBase64Hash, validateAlgorithm, buildIntegrityPolicyHeader, normalizeIntegrityPolicy, mergeHeadersFile } = require('../core')
 const { createExternalResolver } = require('../external')
+const { outputPathFor, sourceToString } = require('./shared')
 
 /**
  * Rollup/Vite plugin: injects SRI into every .html asset in the output bundle.
@@ -27,13 +28,6 @@ const { createExternalResolver } = require('../external')
  *                with `headersFile`, written in Netlify/Cloudflare `_headers` format. The header is
  *                HTTP-only: for other hosts, copy the value logged at the end of the build.
  */
-/**
- * Rollup asset sources are `string | Uint8Array`; String() on a Uint8Array yields "60,104,...".
- */
-function sourceToString(source) {
-    return typeof source === 'string' ? source : Buffer.from(source).toString('utf8')
-}
-
 function sriPlugin(options = {}) {
     const { algorithm = 'sha384', strict = false, external = false, externalTimeout, importMap = true } = options
     const policy = normalizeIntegrityPolicy(options.integrityPolicy)
@@ -70,20 +64,8 @@ function sriPlugin(options = {}) {
                     const htmlDir = path.posix.dirname(htmlName)
 
                     const resolveAsset = async (url) => {
-                        // Under the public base (e.g. "/app/x.js" or "https://cdn.example.com/x.js") the
-                        // remainder is the bundle path; otherwise root-relative URLs map to the bundle root
-                        // and relative URLs resolve from the HTML file.
-                        let p = relativeToBase(url, prefix)
-                        if (p === null) {
-                            p = toFilePath(url)
-                            p = p.startsWith('/') ? p.replace(/^\/+/, '') : path.posix.join(htmlDir, p)
-                        }
-                        p = path.posix.normalize(p)
-                        // Bundle keys are posix paths relative to the output root. Check on a segment
-                        // boundary so a file literally named "..foo.js" is not treated as traversal.
-                        if (p === '..' || p.startsWith('..' + path.posix.sep)) {
-                            throw new Error('potential path traversal, skipping')
-                        }
+                        const p = outputPathFor(url, prefix, htmlDir)
+                        if (p === null) throw new Error('potential path traversal, skipping')
 
                         const found = bundle[p]
                         if (found) return found.type === 'chunk' ? found.code : found.source
@@ -97,13 +79,8 @@ function sriPlugin(options = {}) {
 
                     // Maps a URL as written in this HTML to its bundle key, or null.
                     const toBundlePath = (url) => {
-                        let p = relativeToBase(url, prefix)
-                        if (p === null) {
-                            p = toFilePath(url)
-                            p = p.startsWith('/') ? p.replace(/^\/+/, '') : path.posix.join(htmlDir, p)
-                        }
-                        p = path.posix.normalize(p)
-                        return bundle[p] ? p : null
+                        const p = outputPathFor(url, prefix, htmlDir)
+                        return p !== null && bundle[p] ? p : null
                     }
                     // Public URL of a bundle path as this page's import map must spell it: under an
                     // absolute base (path or CDN URL) that is base + path; under a relative base it is

@@ -1,32 +1,100 @@
 {
   "name": "sri-injector",
   "version": "1.0.0",
-  "description": "",
+  "description": "Inject Subresource Integrity (integrity + crossorigin) into built HTML: CLI plus Vite, Rollup and webpack plugins.",
+  "keywords": [
+    "sri",
+    "subresource-integrity",
+    "integrity",
+    "security",
+    "vite",
+    "rollup",
+    "webpack",
+    "csp"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/pengdows/sri-injector.git"
+  },
+  "license": "ISC",
+  "author": "",
   "main": "index.js",
   "bin": {
     "sri-injector": "./bin/cli.js"
-  },
-  "scripts": {
-    "test": "jest",
-    "run": "node ./bin/cli.js"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "cheerio": "^1.2.0",
-    "commander": "^14.0.3",
-    "fs-extra": "^11.1.1"
-  },
-  "devDependencies": {
-    "jest": "^29.6.4"
   },
   "exports": {
     ".": "./index.js",
     "./rollup": "./adapters/rollup.js",
     "./vite": "./adapters/rollup.js",
+    "./webpack": "./adapters/webpack.js",
     "./core": "./core.js",
-    "./package.json": "./package.json",
-    "./external": "./external.js"
+    "./external": "./external.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "core.js",
+    "external.js",
+    "HashAlgo.js",
+    "SubresourceIntegrityInjector.js",
+    "bin/",
+    "adapters/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "jest",
+    "run": "node ./bin/cli.js",
+    "coverage": "jest --coverage && c8 jest --runInBand __tests__/cli.test.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "commander": "^14.0.3",
+    "fs-extra": "^11.1.1"
+  },
+  "peerDependencies": {
+    "rollup": ">=3",
+    "vite": ">=4",
+    "webpack": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "rollup": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    },
+    "webpack": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@rollup/plugin-html": "^2.0.0",
+    "c8": "^12.0.0",
+    "html-webpack-plugin": "^5.6.8",
+    "jest": "^29.6.4",
+    "rollup": "^4.67.4",
+    "webpack": "^5.112.2"
+  },
+  "jest": {
+    "transform": {},
+    "coverageProvider": "v8",
+    "collectCoverageFrom": [
+      "*.js",
+      "adapters/**/*.js",
+      "!jest.config.js"
+    ],
+    "coverageReporters": [
+      "text"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "lines": 98,
+        "statements": 98,
+        "functions": 98,
+        "branches": 90
+      }
+    }
   }
 }

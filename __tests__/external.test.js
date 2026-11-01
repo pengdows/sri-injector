@@ -143,3 +143,13 @@ describe('timeout covers the response body', () => {
     await expect(resolve('https://x.test/a.js')).rejects.toThrow(/timed out after 50 ms/);
   });
 });
+
+test('without a fetch implementation it explains the Node version requirement', () => {
+  const original = globalThis.fetch;
+  try {
+    delete globalThis.fetch;
+    expect(() => createExternalResolver()).toThrow(/Node 18\+/);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

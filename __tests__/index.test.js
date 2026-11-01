@@ -301,3 +301,37 @@ describe('Integrity-Policy', () => {
         expect(fs.existsSync(path.join(TEST_DIR, '_headers'))).toBe(false);
     });
 });
+
+describe('SubresourceIntegrityInjector helper methods', () => {
+  const s = new SubresourceIntegrityInjector();
+  test('validateHashName accepts supported algorithms and rejects others', () => {
+    expect(s.validateHashName('sha512')).toBe('sha512');
+    expect(() => s.validateHashName('md5')).toThrow(/Unsupported hash algorithm/);
+  });
+  test('isExternal and toFilePath delegate to the shared rules', () => {
+    expect(s.isExternal('https://x.test/a.js')).toBe(true);
+    expect(s.isExternal('/a.js')).toBe(false);
+    expect(s.toFilePath('/a%20b.js?v=1')).toBe('/a b.js');
+  });
+  test('calculateBase64Hash matches a known digest', () => {
+    // sha256("abc") base64
+    expect(s.calculateBase64Hash('abc', 'sha256')).toBe('ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=');
+  });
+});
+
+test('rejects when the output directory does not exist', async () => {
+  await expect(new SubresourceIntegrityInjector().insertSRIInHTML(path.join(TEST_DIR, 'nope'), 'sha256'))
+    .rejects.toThrow(/Output directory not found/);
+});
+
+test('an unreadable resource (a directory, not a file) is reported as an error, not a crash', async () => {
+  fs.ensureDirSync(path.join(TEST_DIR, 'assets'));
+  fs.writeFileSync(HTML_FILE, '<html><head><script src="assets"></script></head><body></body></html>');
+  const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    await expect(new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256', { strict: true }))
+      .rejects.toThrow(/EISDIR/);
+  } finally {
+    spy.mockRestore();
+  }
+});

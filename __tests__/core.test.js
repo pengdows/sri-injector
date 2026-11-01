@@ -411,3 +411,35 @@ describe('Integrity-Policy header', () => {
     });
   });
 });
+
+describe('toFilePath', () => {
+  const { toFilePath } = require('../core');
+  test('strips query and fragment and decodes percent-escapes', () => {
+    expect(toFilePath('/a%20b.js?v=1#x')).toBe('/a b.js');
+  });
+  test('returns malformed percent-encoding untouched instead of throwing', () => {
+    expect(toFilePath('/bad%E0%A4%A.js?v=1')).toBe('/bad%E0%A4%A.js');
+  });
+});
+
+test('normalizeIntegrityPolicy rejects values that are neither boolean, mode string nor object', () => {
+  const { normalizeIntegrityPolicy } = require('../core');
+  expect(() => normalizeIntegrityPolicy('block-everything')).toThrow(/Invalid integrityPolicy option/);
+  expect(() => normalizeIntegrityPolicy(42)).toThrow(/Invalid integrityPolicy option/);
+});
+
+describe('import map placement when the page has no module script', () => {
+  const { injectSri } = require('../core');
+  const entries = { '/lazy.js': 'sha384-abc' };
+  const run = (html) => injectSri(html, () => 'x', { importMapIntegrity: () => entries });
+
+  test('appends to <head> when there is a head but no module script or modulepreload', async () => {
+    const r = await run('<!doctype html><html><head><title>t</title></head><body><script src="/a.js"></script></body></html>');
+    expect(r.html).toMatch(/<title>t<\/title><script type="importmap">/);
+  });
+
+  test('prepends to a bare fragment', async () => {
+    const r = await run('<script src="/a.js"></script>');
+    expect(r.html.startsWith('<script type="importmap">')).toBe(true);
+  });
+});

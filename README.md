@@ -107,6 +107,24 @@ Import-map `integrity` is supported in Chromium 127+ and recent Safari/Firefox; 
 
 Use `strict: true` in CI. With multiple `output` targets, `generateBundle` runs once per target; if only one of them carries the HTML, scope the plugin to that output or leave `strict` off for the others.
 
+## webpack plugin
+
+    // webpack.config.js
+    const HtmlWebpackPlugin = require('html-webpack-plugin')
+    const SriPlugin = require('sri-injector/webpack')
+
+    module.exports = {
+      output: { publicPath: '/', filename: '[name].[contenthash].js' },
+      plugins: [
+        new HtmlWebpackPlugin(),
+        new SriPlugin({ algorithm: 'sha384', strict: true })
+      ]
+    }
+
+It hashes every `.html` asset in the compilation after `html-webpack-plugin` has emitted it, in `processAssets` at `PROCESS_ASSETS_STAGE_OPTIMIZE_TRANSFER`, so the hashes cover the final emitted bytes and the order of `plugins` does not matter. Problems are webpack warnings, or errors with `strict: true`.
+
+Options: `algorithm`, `strict`, `base` (defaults to `output.publicPath` when that is a string other than `'auto'`; relative and full-URL public paths work), `external`, `externalTimeout` and `integrityPolicy` (with `headersFile` it emits a `_headers` asset). There is no `importMap` option: see Limitations.
+
 ## Examples
 
 `examples/` contains a complete input site and the exact output, with a line-by-line explanation of what happened and why, plus a Rollup bundle showing the import map for code-split chunks. They are also golden-file tests. See `examples/README.md`.
@@ -122,7 +140,14 @@ Use `strict: true` in CI. With multiple `output` targets, `generateBundle` runs 
 - Browsers currently enforce `integrity` on `<link rel=preload>` only for `as=script` and `as=style`; on other destinations (`font`, `image`, `fetch`, …) the attribute is accepted but not checked. A preload is also only *reused* if the consuming request matches it: for `as=fetch` your `fetch()` call must pass the same `integrity` and `mode: 'cors'`; for `as=image` the `<img>` must carry `crossorigin`. Otherwise the browser fetches the resource twice.
 
 - Lazy chunks loaded by dynamic `import()` are covered by the Rollup/Vite plugin's import map (above), not by the CLI, which has no module graph. CSS that Vite injects at runtime for lazy chunks is not covered: `<link>` elements created from JS carry no integrity, and import maps only govern module scripts.
-- Webpack's classic chunk loader creates `<script>` elements at runtime, which import maps do not govern; use [webpack-subresource-integrity](https://github.com/waysact/webpack-subresource-integrity) for those, or `output.module` + `chunkLoading: 'import'` with this tool's CLI.
+- The webpack plugin covers the tags in your HTML only. Webpack's classic chunk loader creates `<script>` elements at runtime, which import maps do not govern; use [webpack-subresource-integrity](https://github.com/waysact/webpack-subresource-integrity) for lazy chunks, or `output.module` + `chunkLoading: 'import'` with this tool's CLI.
 - Inline scripts/styles are not covered (SRI does not apply to them).
 - Anything that changes files after this runs (compression that alters content, banners) invalidates hashes.
 - Remote hosts need CORS headers for `crossorigin` resources.
+
+## Development
+
+    npm test            # unit, integration and packaging tests
+    npm run coverage    # tests with a coverage gate
+
+`npm run coverage` fails if coverage drops below the thresholds in `package.json` (in-process code, measured by Jest's V8 provider) and `.c8rc.json` (the CLI, which runs in child processes, so it is measured with `c8`). The packaging tests run `npm pack`, install the tarball into a clean project and run the installed CLI.
