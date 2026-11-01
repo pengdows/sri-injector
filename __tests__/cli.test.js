@@ -162,3 +162,56 @@ describe('--integrity-policy', () => {
     expect(fs.readFileSync(path.join(dir, '_headers'), 'utf8')).toBe('/*\n  Integrity-Policy: blocked-destinations=(script), sources=(inline)\n');
   });
 });
+
+describe('argument handling', () => {
+  const spawnArgs = (...args) => {
+    const r = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8' });
+    return { code: r.status, out: r.stdout + r.stderr };
+  };
+
+  test.each(['abc', '0', '-5', '1.5x'])('--external-timeout %s is rejected with a clear message', (value) => {
+    fs.writeFileSync(path.join(dir, 'index.html'), html('ok.js'));
+    const r = spawnArgs(dir, '--external', `--external-timeout=${value}`);
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/--external-timeout/);
+    expect(r.out).not.toMatch(/NaN/);
+  });
+
+  test('--integrity-policy before the directory does not swallow it', () => {
+    fs.writeFileSync(path.join(dir, 'index.html'), html('ok.js'));
+    const r = spawnArgs('--integrity-policy', dir);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('Integrity-Policy: blocked-destinations=(script)');
+  });
+
+  test('--integrity-policy report-only before the directory still selects the mode', () => {
+    fs.writeFileSync(path.join(dir, 'index.html'), html('ok.js'));
+    const r = spawnArgs('--integrity-policy', 'report-only', dir);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('Integrity-Policy-Report-Only:');
+  });
+
+  test('an unknown --integrity-policy mode written with = is still rejected', () => {
+    fs.writeFileSync(path.join(dir, 'index.html'), html('ok.js'));
+    const r = spawnArgs(dir, '--integrity-policy=bogus');
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/enforce.*report-only/);
+  });
+
+  test('--headers-file outside the output directory is rejected and nothing is written', () => {
+    fs.writeFileSync(path.join(dir, 'index.html'), html('ok.js'));
+    const escaped = path.join(path.dirname(dir), `sri-escape-${path.basename(dir)}`);
+    const r = spawnArgs(dir, '--integrity-policy', '--headers-file', `../${path.basename(escaped)}`);
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/headers file/i);
+    expect(fs.existsSync(escaped)).toBe(false);
+  });
+
+  test('an absolute --headers-file is rejected too', () => {
+    fs.writeFileSync(path.join(dir, 'index.html'), html('ok.js'));
+    const target = path.join(os.tmpdir(), `sri-abs-${path.basename(dir)}`);
+    const r = spawnArgs(dir, '--integrity-policy', '--headers-file', target);
+    expect(r.code).toBe(1);
+    expect(fs.existsSync(target)).toBe(false);
+  });
+});

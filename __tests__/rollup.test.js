@@ -372,3 +372,30 @@ describe('Integrity-Policy', () => {
     expect(sriPlugin({ integrityPolicy: 'report-only' }).config({}).preview.headers).toHaveProperty('Integrity-Policy-Report-Only');
   });
 });
+
+describe('Uint8Array asset sources', () => {
+  const decode = (s) => (typeof s === 'string' ? s : Buffer.from(s).toString('utf8'));
+
+  test('HTML emitted as a Uint8Array is decoded, not stringified as comma-separated bytes', async () => {
+    const b = makeBundle('');
+    b['index.html'].source = new Uint8Array(Buffer.from('<html><head><script src="/assets/app-abc.js"></script></head></html>'));
+    await run(b);
+    const out = decode(b['index.html'].source);
+    expect(out).toContain(`integrity="${sha('console.log(1)')}"`);
+    expect(out).not.toMatch(/^\d+,\d+/);
+  });
+
+  test('an existing _headers asset emitted as a Uint8Array is merged, not corrupted', async () => {
+    const b = makeBundle('<html><head><script src="/assets/app-abc.js"></script></head></html>');
+    b['_headers'] = { type: 'asset', fileName: '_headers', source: new Uint8Array(Buffer.from('/assets/*\n  Cache-Control: max-age=31536000\n')) };
+    await run(b, { integrityPolicy: { headersFile: '_headers' } });
+    const out = decode(b['_headers'].source);
+    expect(out).toContain('Cache-Control: max-age=31536000');
+    expect(out).toContain('Integrity-Policy: ');
+    expect(out).not.toMatch(/\d+,\d+,\d+/);
+  });
+});
+
+test('a headersFile that escapes the output directory is rejected', () => {
+  expect(() => require('../adapters/rollup')({ integrityPolicy: { headersFile: '../_headers' } })).toThrow(/headers file/i);
+});

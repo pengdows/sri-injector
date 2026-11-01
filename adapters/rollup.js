@@ -27,6 +27,13 @@ const { createExternalResolver } = require('../external')
  *                with `headersFile`, written in Netlify/Cloudflare `_headers` format. The header is
  *                HTTP-only: for other hosts, copy the value logged at the end of the build.
  */
+/**
+ * Rollup asset sources are `string | Uint8Array`; String() on a Uint8Array yields "60,104,...".
+ */
+function sourceToString(source) {
+    return typeof source === 'string' ? source : Buffer.from(source).toString('utf8')
+}
+
 function sriPlugin(options = {}) {
     const { algorithm = 'sha384', strict = false, external = false, externalTimeout, importMap = true } = options
     const policy = normalizeIntegrityPolicy(options.integrityPolicy)
@@ -59,7 +66,7 @@ function sriPlugin(options = {}) {
                 for (const [htmlName, item] of Object.entries(bundle)) {
                     if (item.type !== 'asset' || !htmlName.endsWith('.html')) continue
                     htmlCount++
-                    const html = String(item.source)
+                    const html = sourceToString(item.source)
                     const htmlDir = path.posix.dirname(htmlName)
 
                     const resolveAsset = async (url) => {
@@ -156,7 +163,7 @@ function sriPlugin(options = {}) {
                         // asset would otherwise replace it and drop the user's own rules).
                         const existing = bundle[policy.headersFile]
                         const publicCopy = publicDir && path.join(publicDir, policy.headersFile)
-                        const current = existing ? String(existing.source)
+                        const current = existing ? sourceToString(existing.source)
                             : publicCopy && fs.existsSync(publicCopy) ? fs.readFileSync(publicCopy, 'utf8')
                             : ''
                         const merged = mergeHeadersFile(current, policyHeader)

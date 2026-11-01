@@ -157,6 +157,19 @@ function buildIntegrityPolicyHeader({ reportOnly = false, endpoints = [] } = {})
 }
 
 /**
+ * The headers file is read and written relative to the output directory, so it must be a plain
+ * relative path that stays inside it ("_headers", "sub/_headers"; never "../x" or an absolute path).
+ */
+function validateHeadersFile(file) {
+    if (file === undefined || file === null || file === '') return undefined
+    const segments = String(file).split(/[\\/]/)
+    if (typeof file !== 'string' || path.isAbsolute(file) || path.win32.isAbsolute(file) || segments.includes('..')) {
+        throw new Error(`Invalid headers file ${JSON.stringify(file)}: must be a relative path inside the output directory`)
+    }
+    return file
+}
+
+/**
  * Normalizes the user-facing `integrityPolicy` option:
  *   false | undefined        -> null (off)
  *   true | 'enforce'         -> { reportOnly: false, endpoints: [], headersFile: undefined }
@@ -168,7 +181,7 @@ function normalizeIntegrityPolicy(option) {
     if (option === true || option === 'enforce') return { reportOnly: false, endpoints: [], headersFile: undefined }
     if (option === 'report-only') return { reportOnly: true, endpoints: [], headersFile: undefined }
     if (typeof option === 'object') {
-        return { reportOnly: !!option.reportOnly, endpoints: option.endpoints || [], headersFile: option.headersFile }
+        return { reportOnly: !!option.reportOnly, endpoints: option.endpoints || [], headersFile: validateHeadersFile(option.headersFile) }
     }
     throw new Error(`Invalid integrityPolicy option: ${JSON.stringify(option)}`)
 }

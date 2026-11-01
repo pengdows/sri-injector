@@ -32,35 +32,44 @@ function createExternalResolver({ timeout = 10000, fetch: fetchImpl } = {}) {
             throw new SkipResource(`unsupported URL scheme for external resources`)
         }
 
+        // One timer covers headers *and* body: a server that sends headers and then stalls must
+        // not hang the build. The race also guards implementations whose body read ignores `signal`.
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), timeout)
-        let res
+        const aborted = new Promise((_, reject) => {
+            controller.signal.addEventListener('abort', () => reject(new Error('aborted')))
+        })
+        aborted.catch(() => {}) // never leave this rejection unhandled
         try {
-            res = await doFetch(target, {
-                redirect: 'follow',
-                signal: controller.signal,
-                headers: { Origin: PROBE_ORIGIN, Accept: '*/*' }
-            })
+            const res = await Promise.race([
+                doFetch(target, {
+                    redirect: 'follow',
+                    signal: controller.signal,
+                    headers: { Origin: PROBE_ORIGIN, Accept: '*/*' }
+                }),
+                aborted
+            ])
+
+            if (res.status === 404) return null
+            if (!res.ok) throw new Error(`server responded with HTTP ${res.status}`)
+
+            const acao = res.headers.get('access-control-allow-origin')
+            if (acao !== '*' && acao !== PROBE_ORIGIN) {
+                throw new SkipResource(
+                    'server sends no usable Access-Control-Allow-Origin header, so browsers could not verify integrity; tag left unchanged'
+                )
+            }
+
+            return Buffer.from(await Promise.race([res.arrayBuffer(), aborted]))
         } catch (err) {
             if (controller.signal.aborted) throw new Error(`request timed out after ${timeout} ms`)
             // Node reports every network failure as a bare "fetch failed"; the reason is in `cause`.
             const cause = err && err.cause
-            throw new Error(cause ? `${err.message} (${cause.message || cause.code || cause})` : err.message)
+            if (cause) throw new Error(`${err.message} (${cause.message || cause.code || cause})`)
+            throw err
         } finally {
             clearTimeout(timer)
         }
-
-        if (res.status === 404) return null
-        if (!res.ok) throw new Error(`server responded with HTTP ${res.status}`)
-
-        const acao = res.headers.get('access-control-allow-origin')
-        if (acao !== '*' && acao !== PROBE_ORIGIN) {
-            throw new SkipResource(
-                'server sends no usable Access-Control-Allow-Origin header, so browsers could not verify integrity; tag left unchanged'
-            )
-        }
-
-        return Buffer.from(await res.arrayBuffer())
     }
 
     return (url) => {

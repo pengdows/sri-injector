@@ -114,3 +114,32 @@ describe('URL handling (injected fetch)', () => {
     expect(seen).toEqual([]);
   });
 });
+
+describe('timeout covers the response body', () => {
+  const stalledBody = () => async () => ({
+    status: 200,
+    ok: true,
+    headers: { get: () => '*' },
+    arrayBuffer: () => new Promise(() => {}), // headers arrive, body never does
+  });
+
+  test('a body that never finishes rejects with a timeout instead of hanging', async () => {
+    const resolve = createExternalResolver({ timeout: 50, fetch: stalledBody() });
+    const outcome = await Promise.race([
+      resolve('https://x.test/a.js').then(() => 'resolved', (e) => e.message),
+      new Promise((r) => setTimeout(() => r('STILL PENDING'), 1000)),
+    ]);
+    expect(outcome).toMatch(/timed out after 50 ms/);
+  });
+
+  test('an abort during body read surfaces as a timeout', async () => {
+    const fetchImpl = async (_url, { signal }) => ({
+      status: 200,
+      ok: true,
+      headers: { get: () => '*' },
+      arrayBuffer: () => new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')))),
+    });
+    const resolve = createExternalResolver({ timeout: 50, fetch: fetchImpl });
+    await expect(resolve('https://x.test/a.js')).rejects.toThrow(/timed out after 50 ms/);
+  });
+});
