@@ -112,11 +112,42 @@ test('rejects sibling directories sharing the output dir prefix', async () => {
     fs.removeSync(evil);
 });
 
-test('strict mode rejects when a resource is missing; default does not', async () => {
+test('strict mode rejects when a resource is missing; default resolves and reports the errors', async () => {
     fs.writeFileSync(HTML_FILE, '<html><head><script src="nope.js"></script></head><body></body></html>');
     const s = new SubresourceIntegrityInjector();
-    await expect(s.insertSRIInHTML(TEST_DIR, 'sha256')).resolves.toBeUndefined();
+    await expect(s.insertSRIInHTML(TEST_DIR, 'sha256')).resolves.toEqual({
+        files: 1,
+        errors: [expect.stringMatching(/nope\.js/)],
+        warnings: [],
+    });
     await expect(s.insertSRIInHTML(TEST_DIR, 'sha256', { strict: true })).rejects.toThrow(/nope\.js/);
+});
+
+test('resolves with the processed file count and no errors on success', async () => {
+    await expect(new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256'))
+        .resolves.toEqual({ files: 1, errors: [], warnings: [] });
+});
+
+test('no HTML files: resolves with files=0 by default, rejects in strict mode', async () => {
+    fs.removeSync(HTML_FILE);
+    const s = new SubresourceIntegrityInjector();
+    await expect(s.insertSRIInHTML(TEST_DIR, 'sha256')).resolves.toEqual({ files: 0, errors: [], warnings: [] });
+    await expect(s.insertSRIInHTML(TEST_DIR, 'sha256', { strict: true })).rejects.toThrow(/No HTML files/);
+});
+
+test('does not mistake a file named "..foo.js" for path traversal', async () => {
+    fs.writeFileSync(path.join(TEST_DIR, '..foo.js'), 'var f=1;');
+    fs.writeFileSync(HTML_FILE, '<html><head><script src="..foo.js"></script><script src="/..foo.js"></script></head><body></body></html>');
+    const result = await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256', { strict: true });
+    expect(result.errors).toEqual([]);
+    const out = fs.readFileSync(HTML_FILE, 'utf-8');
+    expect(out.match(/integrity="sha256-/g)).toHaveLength(2);
+});
+
+test('still rejects a reference to the parent directory itself', async () => {
+    fs.writeFileSync(HTML_FILE, '<html><head><script src=".."></script></head><body></body></html>');
+    const { errors } = await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256');
+    expect(errors).toEqual([expect.stringMatching(/path traversal/)]);
 });
 
 test('invalid algorithm throws', async () => {
@@ -142,4 +173,131 @@ test('processes HTML files in subdirectories, resolving relative URLs from the f
     fs.writeFileSync(path.join(TEST_DIR, 'sub', 'page.html'), '<html><head><script src="../test.js"></script></head><body></body></html>');
     await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256');
     expect(fs.readFileSync(path.join(TEST_DIR, 'sub', 'page.html'), 'utf-8')).toContain('integrity="sha256-');
+});
+
+describe('absolute-URL base (CDN deployments)', () => {
+    const CDN = 'https://cdn.example.com/';
+
+    beforeEach(() => {
+        fs.ensureDirSync(path.join(TEST_DIR, 'assets'));
+        fs.writeFileSync(path.join(TEST_DIR, 'assets', 'app.js'), 'var a=1;');
+    });
+
+    test('resolves CDN URLs under base against the output directory', async () => {
+        fs.writeFileSync(HTML_FILE, `<html><head><script src="${CDN}assets/app.js"></script></head><body></body></html>`);
+        const result = await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256', { strict: true, base: CDN });
+        expect(result.errors).toEqual([]);
+        expect(fs.readFileSync(HTML_FILE, 'utf-8')).toContain('integrity="sha256-');
+    });
+
+    test('a CDN URL under base cannot escape the output directory', async () => {
+        fs.writeFileSync(HTML_FILE, `<html><head><script src="${CDN}../secret.js"></script></head><body></body></html>`);
+        const { errors } = await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256', { base: CDN });
+        expect(errors).toEqual([expect.stringMatching(/path traversal/)]);
+    });
+
+    test('without base, CDN URLs are still treated as external', async () => {
+        fs.writeFileSync(HTML_FILE, `<html><head><script src="${CDN}assets/app.js"></script></head><body></body></html>`);
+        const result = await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256');
+        expect(result.errors).toEqual([]);
+        expect(fs.readFileSync(HTML_FILE, 'utf-8')).not.toContain('integrity=');
+    });
+});
+
+describe('existing integrity attributes', () => {
+    const crypto = require('crypto');
+    const valid = () => 'sha256-' + crypto.createHash('sha256').update(fs.readFileSync(path.join(TEST_DIR, 'test.js'))).digest('base64');
+
+    test('a file whose integrity values are all valid is not rewritten', async () => {
+        const original = `<html><head><script src="test.js" integrity="${valid()}" crossorigin="anonymous"></script></head><body></body></html>`;
+        fs.writeFileSync(HTML_FILE, original);
+        const result = await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256');
+        expect(result.warnings).toEqual([]);
+        expect(fs.readFileSync(HTML_FILE, 'utf-8')).toBe(original);
+    });
+
+    test('stale values are replaced and surfaced as warnings, not errors', async () => {
+        fs.writeFileSync(HTML_FILE, '<html><head><script src="test.js" integrity="sha256-STALE"></script></head><body></body></html>');
+        const result = await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256', { strict: true });
+        expect(result.errors).toEqual([]);
+        expect(result.warnings).toEqual([expect.stringMatching(/test\.js.*sha256-STALE/)]);
+        expect(fs.readFileSync(HTML_FILE, 'utf-8')).toContain(`integrity="${valid()}"`);
+    });
+});
+
+describe('external resources (--external)', () => {
+    const http = require('http');
+    let server, origin;
+    beforeAll(async () => {
+        server = http.createServer((req, res) => {
+            if (req.url === '/lib.js') { res.writeHead(200, { 'Access-Control-Allow-Origin': '*' }); return res.end('lib'); }
+            if (req.url === '/no-cors.js') { res.writeHead(200); return res.end('nc'); }
+            res.writeHead(404); res.end();
+        });
+        await new Promise(r => server.listen(0, '127.0.0.1', r));
+        origin = `http://127.0.0.1:${server.address().port}`;
+    });
+    afterAll(() => new Promise(r => server.close(r)));
+
+    test('default: external resources are left alone', async () => {
+        fs.writeFileSync(HTML_FILE, `<html><head><script src="${origin}/lib.js"></script></head><body></body></html>`);
+        await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256');
+        expect(fs.readFileSync(HTML_FILE, 'utf-8')).not.toContain('integrity=');
+    });
+
+    test('external: true fetches and hashes CORS-enabled third-party resources', async () => {
+        fs.writeFileSync(HTML_FILE, `<html><head><script src="${origin}/lib.js"></script></head><body></body></html>`);
+        const result = await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256', { strict: true, external: true });
+        expect(result.errors).toEqual([]);
+        const sha = 'sha256-' + require('crypto').createHash('sha256').update('lib').digest('base64');
+        expect(fs.readFileSync(HTML_FILE, 'utf-8')).toContain(`integrity="${sha}"`);
+    });
+
+    test('external: true leaves a non-CORS resource alone with a warning, and strict still passes', async () => {
+        fs.writeFileSync(HTML_FILE, `<html><head><script src="${origin}/no-cors.js"></script></head><body></body></html>`);
+        const result = await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256', { strict: true, external: true });
+        expect(result.errors).toEqual([]);
+        expect(result.warnings).toEqual([expect.stringMatching(/no-cors\.js.*Access-Control-Allow-Origin/)]);
+        expect(fs.readFileSync(HTML_FILE, 'utf-8')).not.toContain('integrity=');
+    });
+
+    test('external: true + strict fails on an unreachable third-party resource', async () => {
+        fs.writeFileSync(HTML_FILE, `<html><head><script src="${origin}/gone.js"></script></head><body></body></html>`);
+        await expect(new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256', { strict: true, external: true }))
+            .rejects.toThrow(/gone\.js/);
+    });
+});
+
+describe('Integrity-Policy', () => {
+    const HEADER = 'Integrity-Policy: blocked-destinations=(script), sources=(inline)';
+
+    test('integrityPolicy: true turns unprotected scripts into errors even without strict', async () => {
+        fs.writeFileSync(HTML_FILE, '<html><head><script src="https://third.example.net/a.js"></script><script src="test.js"></script></head><body></body></html>');
+        const result = await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256', { integrityPolicy: true });
+        expect(result.errors).toEqual([expect.stringMatching(/Integrity-Policy[\s\S]*third\.example\.net\/a\.js/)]);
+        expect(result.integrityPolicy).toEqual({ name: 'Integrity-Policy', value: 'blocked-destinations=(script), sources=(inline)' });
+    });
+
+    test('headersFile writes and then merges a _headers file in the output directory', async () => {
+        const file = path.join(TEST_DIR, '_headers');
+        fs.writeFileSync(file, '/assets/*\n  Cache-Control: immutable\n');
+        const s = new SubresourceIntegrityInjector();
+        await s.insertSRIInHTML(TEST_DIR, 'sha256', { integrityPolicy: { headersFile: '_headers' } });
+        await s.insertSRIInHTML(TEST_DIR, 'sha256', { integrityPolicy: { headersFile: '_headers' } });
+        expect(fs.readFileSync(file, 'utf-8')).toBe(`/assets/*\n  Cache-Control: immutable\n\n/*\n  ${HEADER}\n`);
+    });
+
+    test('warns when output JS uses dynamic import(), which the CLI cannot cover with an import map', async () => {
+        fs.writeFileSync(path.join(TEST_DIR, 'test.js'), 'button.onclick = () => import("./lazy.js")');
+        const result = await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256', { integrityPolicy: true });
+        expect(result.warnings).toEqual([expect.stringMatching(/test\.js.*import\(\)/)]);
+    });
+
+    test('without the option there is no header, no file and no audit', async () => {
+        fs.writeFileSync(HTML_FILE, '<html><head><script src="https://third.example.net/a.js"></script></head><body></body></html>');
+        const result = await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256', { strict: true });
+        expect(result.errors).toEqual([]);
+        expect(result.integrityPolicy).toBeUndefined();
+        expect(fs.existsSync(path.join(TEST_DIR, '_headers'))).toBe(false);
+    });
 });

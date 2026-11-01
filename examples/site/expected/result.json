@@ -1,0 +1,7 @@
+{
+  "files": 2,
+  "errors": [],
+  "warnings": [
+    "Replaced integrity on \"/assets/app.js\": existing value \"sha384-STALE-VALUE\" did not match the resource."
+  ]
+}

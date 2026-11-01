@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Example</title>
+
+  <!-- stylesheet, multi-token rel, root-relative -->
+  <link rel="alternate stylesheet" href="/assets/site.css" title="Alt">
+  <link rel="Stylesheet" href="assets/fonts.css?v=3#frag">
+
+  <!-- preload / modulepreload -->
+  <link rel="preload" as="font" type="font/woff2" href="/assets/x.woff2">
+  <link rel="modulepreload" href="/assets/lazy.js">
+
+  <!-- existing integrity: valid (other algorithm) is kept, stale is replaced -->
+  <script src="/assets/vendor.js" integrity="sha256-NfN046R6/jCAngl3Ot9SBrQAyoa2Z8yapcX5U5B0dec=" crossorigin="anonymous"></script>
+  <script src="/assets/app.js" integrity="sha384-STALE-VALUE" crossorigin="use-credentials"></script>
+
+  <!-- a file whose name merely starts with ".." -->
+  <script src="/assets/..odd.js"></script>
+
+  <!-- untouched: external, inline, icon, prefetch -->
+  <script src="https://cdn.example.net/analytics.js" defer></script>
+  <script>window.inline = true;</script>
+  <link rel="icon" href="/favicon.ico">
+  <link rel="prefetch" href="/assets/lazy.js">
+</head>
+<body>
+  <script src="legacy.js" async></script>
+</body>
+</html>

@@ -26,6 +26,7 @@
     "./rollup": "./adapters/rollup.js",
     "./vite": "./adapters/rollup.js",
     "./core": "./core.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./external": "./external.js"
   }
 }

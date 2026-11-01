@@ -1,0 +1,9 @@
+{
+  "_comment": "A Rollup/Vite output bundle as seen by generateBundle, for a site deployed to a CDN (base https://cdn.example.com/). entry -> lazy (dynamic) -> shared (static). orphan is unreachable from index.html.",
+  "index.html": { "type": "asset", "fileName": "index.html", "source": "<!doctype html>\n<html>\n<head>\n  <meta charset=\"utf-8\">\n  <link rel=\"stylesheet\" href=\"https://cdn.example.com/assets/index-a1b2c3.css\">\n  <script type=\"module\" crossorigin src=\"https://cdn.example.com/assets/index-d4e5f6.js\"></script>\n</head>\n<body></body>\n</html>\n" },
+  "assets/index-d4e5f6.js":  { "type": "chunk", "fileName": "assets/index-d4e5f6.js",  "code": "document.body.onclick=()=>import(\"./lazy-g7h8i9.js\");\n", "imports": [], "dynamicImports": ["assets/lazy-g7h8i9.js"] },
+  "assets/lazy-g7h8i9.js":   { "type": "chunk", "fileName": "assets/lazy-g7h8i9.js",   "code": "import{s}from\"./shared-j1k2l3.js\";export const lazy=s+1;\n", "imports": ["assets/shared-j1k2l3.js"], "dynamicImports": [] },
+  "assets/shared-j1k2l3.js": { "type": "chunk", "fileName": "assets/shared-j1k2l3.js", "code": "export const s=41;\n", "imports": [], "dynamicImports": [] },
+  "assets/orphan-m4n5o6.js": { "type": "chunk", "fileName": "assets/orphan-m4n5o6.js", "code": "console.log(\"never referenced\");\n", "imports": [], "dynamicImports": [] },
+  "assets/index-a1b2c3.css": { "type": "asset", "fileName": "assets/index-a1b2c3.css", "source": "body{margin:0}\n" }
+}
