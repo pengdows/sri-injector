@@ -215,3 +215,19 @@ describe('argument handling', () => {
     expect(fs.existsSync(target)).toBe(false);
   });
 });
+
+describe('--crossorigin', () => {
+  test('use-credentials is written to tags that lack crossorigin', () => {
+    fs.writeFileSync(path.join(dir, 'index.html'), html('ok.js'));
+    const r = runCli(dir, '--crossorigin', 'use-credentials');
+    expect(r.code).toBe(0);
+    expect(fs.readFileSync(path.join(dir, 'index.html'), 'utf8')).toContain('crossorigin="use-credentials"');
+  });
+
+  test('an unsupported value exits 1 with a clear message', () => {
+    fs.writeFileSync(path.join(dir, 'index.html'), html('ok.js'));
+    const r = runCli(dir, '--crossorigin', 'sometimes');
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/crossorigin/);
+  });
+});

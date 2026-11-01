@@ -159,3 +159,18 @@ test('running twice on the same output does not change the HTML (idempotent)', a
   await new SubresourceIntegrityInjector().insertSRIInHTML(first.dist, 'sha384', { base: '/' });
   expect(first.read('index.html').toString('utf8')).toBe(before);
 });
+
+test('enabled: false leaves the HTML untouched', async () => {
+  const r = await build({ sriOptions: { enabled: false } });
+  expect(r.read('index.html').toString('utf8')).not.toContain('integrity=');
+  expect(r.warnings).toEqual([]);
+});
+
+test('the crossorigin option is applied', async () => {
+  const r = await build({ sriOptions: { crossorigin: 'use-credentials' } });
+  expect(scriptTags(r.read('index.html').toString('utf8')).every(t => /crossorigin="use-credentials"/.test(t))).toBe(true);
+});
+
+test('an invalid crossorigin value is rejected at configuration time', () => {
+  expect(() => new SriWebpackPlugin({ crossorigin: 'sometimes' })).toThrow(/crossorigin/);
+});

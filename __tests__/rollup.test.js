@@ -16,6 +16,7 @@ async function run(bundle, opts = {}, ctx = {}) {
   };
   if (plugin.configResolved && ctx.config) plugin.configResolved(ctx.config);
   await plugin.generateBundle.handler.call(self, {}, bundle);
+  if (plugin.closeBundle) await plugin.closeBundle.call(self);
   return warnings;
 }
 
@@ -398,4 +399,99 @@ describe('Uint8Array asset sources', () => {
 
 test('a headersFile that escapes the output directory is rejected', () => {
   expect(() => require('../adapters/rollup')({ integrityPolicy: { headersFile: '../_headers' } })).toThrow(/headers file/i);
+});
+
+describe('multi-output builds (e.g. @vitejs/plugin-legacy builds legacy chunks in a separate output)', () => {
+  const setup = (opts = {}) => {
+    const plugin = sriPlugin({ algorithm: 'sha256', ...opts });
+    const warnings = [];
+    const self = { error: (m) => { throw new Error(m); }, warn: (m) => warnings.push(m), info: () => {}, emitFile: () => {} };
+    return {
+      warnings,
+      pass: (bundle) => plugin.generateBundle.handler.call(self, {}, bundle),
+      close: async () => plugin.closeBundle.call(self),
+    };
+  };
+  const legacyOutput = () => ({ 'assets/polyfills-legacy.js': { type: 'chunk', fileName: 'assets/polyfills-legacy.js', code: 'poly()' } });
+  const htmlOutput = () => ({
+    'index.html': { type: 'asset', fileName: 'index.html', source: '<html><head><script nomodule src="/assets/polyfills-legacy.js"></script></head></html>' },
+  });
+
+  test('a chunk emitted by an earlier output is hashed when a later output references it', async () => {
+    const t = setup();
+    await t.pass(legacyOutput());
+    const html = htmlOutput();
+    await t.pass(html);
+    await t.close();
+    expect(html['index.html'].source).toContain(`integrity="${sha('poly()')}"`);
+    expect(t.warnings).toEqual([]);
+  });
+
+  test('an output without HTML does not fail strict while another output has HTML', async () => {
+    const t = setup({ strict: true });
+    await t.pass(legacyOutput());
+    await t.pass(htmlOutput());
+    await expect(t.close()).resolves.toBeUndefined();
+  });
+
+  test('strict still fails at close when no output contained HTML', async () => {
+    const t = setup({ strict: true });
+    await t.pass(legacyOutput());
+    await expect(t.close()).rejects.toThrow(/No HTML/i);
+  });
+
+  test('a file in the current output wins over a same-named file from an earlier output', async () => {
+    const t = setup();
+    await t.pass(legacyOutput());
+    const html = {
+      ...htmlOutput(),
+      'assets/polyfills-legacy.js': { type: 'chunk', fileName: 'assets/polyfills-legacy.js', code: 'newer()' },
+    };
+    await t.pass(html);
+    expect(html['index.html'].source).toContain(sha('newer()'));
+    expect(html['index.html'].source).not.toContain(sha('poly()'));
+  });
+
+  test('earlier outputs are forgotten at close, so the next build cannot resolve stale files', async () => {
+    const t = setup();
+    await t.pass(legacyOutput());
+    await t.pass(htmlOutput());
+    await t.close();
+    const html = htmlOutput();
+    await t.pass(html);
+    expect(html['index.html'].source).not.toContain('integrity=');
+    expect(t.warnings.join('\n')).toMatch(/polyfills-legacy\.js/);
+  });
+});
+
+describe('enabled option', () => {
+  test('enabled: false leaves HTML untouched and stays silent, even with strict', async () => {
+    const b = makeBundle('<html><head><script src="/assets/app-abc.js"></script></head></html>');
+    const before = b['index.html'].source;
+    const warnings = await run(b, { enabled: false, strict: true });
+    expect(b['index.html'].source).toBe(before);
+    expect(warnings).toEqual([]);
+  });
+
+  test('enabled: false with no HTML does not complain', async () => {
+    await expect(run({ 'a.js': { type: 'chunk', fileName: 'a.js', code: '1' } }, { enabled: false, strict: true })).resolves.toEqual([]);
+  });
+});
+
+describe('crossorigin option', () => {
+  test('is applied to tags that have no crossorigin', async () => {
+    const b = makeBundle('<html><head><script src="/assets/app-abc.js"></script></head></html>');
+    await run(b, { crossorigin: 'use-credentials' });
+    expect(b['index.html'].source).toContain('crossorigin="use-credentials"');
+  });
+
+  test('does not override an existing crossorigin attribute', async () => {
+    const b = makeBundle('<html><head><script src="/assets/app-abc.js" crossorigin="anonymous"></script></head></html>');
+    await run(b, { crossorigin: 'use-credentials' });
+    expect(b['index.html'].source).toContain('crossorigin="anonymous"');
+  });
+
+  test('rejects values other than anonymous and use-credentials at configuration time', () => {
+    expect(() => sriPlugin({ crossorigin: 'yes' })).toThrow(/crossorigin/);
+  });
 });

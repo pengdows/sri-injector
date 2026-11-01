@@ -28,6 +28,7 @@ program
   .description('Inject Subresource Integrity (SRI) attributes into HTML files.')
   .argument('<outputDir>', 'Directory containing the HTML and asset files (e.g., ./dist)')
   .option('-a, --algo <algorithm>', 'Hash algorithm to use (sha256, sha384, sha512)', 'sha384')
+  .option('--crossorigin <value>', 'Value for the crossorigin attribute on tags that have none (anonymous or use-credentials)', 'anonymous')
   .option('--strict', 'Also fail (exit 1) when no HTML files are found', false)
   .option('-b, --base <pathOrUrl>', 'Public base the HTML was built for (e.g. /app/ or https://cdn.example.com/). With a URL, assets under it are hashed instead of skipped as external', '/')
   .option('--external', 'Also fetch third-party resources (https://..., //host/...) and pin them. Servers without CORS headers are skipped with a warning', false)
@@ -46,6 +47,7 @@ program
     }
     injector.insertSRIInHTML(outputDir, options.algo, {
       strict: options.strict,
+      crossorigin: options.crossorigin,
       base: options.base,
       external: options.external,
       externalTimeout: options.externalTimeout,

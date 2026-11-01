@@ -1,5 +1,5 @@
 const path = require('path')
-const { injectSri, toFilePath, isInsideDir, normalizeBase, relativeToBase, isExternal, calculateBase64Hash, validateAlgorithm, buildIntegrityPolicyHeader, normalizeIntegrityPolicy, mergeHeadersFile } = require('../core')
+const { injectSri, toFilePath, isInsideDir, normalizeBase, relativeToBase, isExternal, calculateBase64Hash, validateAlgorithm, validateCrossorigin, buildIntegrityPolicyHeader, normalizeIntegrityPolicy, mergeHeadersFile } = require('../core')
 const { createExternalResolver } = require('../external')
 const { outputPathFor, sourceToString } = require('./shared')
 
@@ -9,8 +9,11 @@ const { outputPathFor, sourceToString } = require('./shared')
  * Place it after any plugin that emits or rewrites HTML or assets.
  *
  * Options:
+ *  - enabled:   set to false to turn the plugin off (e.g. for a watch/dev build). Default true.
  *  - algorithm: 'sha256' | 'sha384' (default) | 'sha512'
- *  - strict:    throw (fail the build) if a local resource cannot be resolved or the bundle has no HTML
+ *  - crossorigin: 'anonymous' (default) | 'use-credentials', written to tags that have none
+ *  - strict:    throw (fail the build) if a local resource cannot be resolved or the build produced no HTML
+ *               in any output
  *  - base:      public base path or URL; defaults to Vite's resolved `base`, else '/'. When it is a
  *               full URL (CDN deployment), assets under it are hashed instead of being skipped as external.
  *  - publicDir: extra dir checked for files not in the bundle (defaults to Vite's publicDir)
@@ -29,11 +32,20 @@ const { outputPathFor, sourceToString } = require('./shared')
  *                HTTP-only: for other hosts, copy the value logged at the end of the build.
  */
 function sriPlugin(options = {}) {
-    const { algorithm = 'sha384', strict = false, external = false, externalTimeout, importMap = true } = options
+    const { algorithm = 'sha384', strict = false, external = false, externalTimeout, importMap = true, enabled = true } = options
+    const crossorigin = validateCrossorigin(options.crossorigin)
     const policy = normalizeIntegrityPolicy(options.integrityPolicy)
     const policyHeader = policy ? buildIntegrityPolicyHeader(policy) : null
     let base = options.base
     let publicDir = options.publicDir
+
+    // A build can have several outputs (e.g. @vitejs/plugin-legacy builds its legacy chunks in a
+    // separate output *before* the output that contains the HTML). Files from earlier outputs are
+    // remembered so the HTML can still resolve them, and whether any output had HTML is judged once,
+    // at closeBundle, rather than per output.
+    const earlierOutputs = new Map()
+    let outputsSeen = 0
+    let htmlSeen = 0
 
     return {
         name: 'sri-injector',
@@ -46,9 +58,22 @@ function sriPlugin(options = {}) {
             if (base === undefined) base = config.base
             if (publicDir === undefined && config.publicDir) publicDir = config.publicDir
         },
+        closeBundle() {
+            const noHtml = enabled && outputsSeen > 0 && htmlSeen === 0
+            earlierOutputs.clear()
+            outputsSeen = 0
+            htmlSeen = 0
+            if (!noHtml) return
+            // Nothing was protected. A build that produces no HTML has nothing for SRI to do, which
+            // is almost always a misconfiguration (e.g. plugin placed before the HTML is emitted).
+            const msg = 'sri-injector: No HTML files found in any output; no integrity attributes were injected.'
+            if (strict) this.error(msg)
+            else this.warn(msg)
+        },
         generateBundle: {
             order: 'post',
             async handler(_outputOptions, bundle) {
+                if (!enabled) return
                 const fs = require('fs')
                 const prefix = normalizeBase(base)
                 const algo = validateAlgorithm(algorithm)
@@ -56,6 +81,7 @@ function sriPlugin(options = {}) {
                 const allErrors = []
                 const unprotected = []
                 let htmlCount = 0
+                outputsSeen++
 
                 for (const [htmlName, item] of Object.entries(bundle)) {
                     if (item.type !== 'asset' || !htmlName.endsWith('.html')) continue
@@ -69,6 +95,7 @@ function sriPlugin(options = {}) {
 
                         const found = bundle[p]
                         if (found) return found.type === 'chunk' ? found.code : found.source
+                        if (earlierOutputs.has(p)) return earlierOutputs.get(p)
                         if (publicDir) {
                             const full = path.resolve(publicDir, p)
                             if (!isInsideDir(path.resolve(publicDir), full)) return null
@@ -113,21 +140,20 @@ function sriPlugin(options = {}) {
                         return entries
                     } : undefined
 
-                    const { html: out, modified, errors, warnings, unprotectedScripts } = await injectSri(html, resolveAsset, { algorithm, base: prefix, resolveExternal, importMapIntegrity })
+                    const { html: out, modified, errors, warnings, unprotectedScripts } = await injectSri(html, resolveAsset, { algorithm, crossorigin, base: prefix, resolveExternal, importMapIntegrity })
                     errors.forEach(e => allErrors.push(`${htmlName}: ${e}`))
                     unprotectedScripts.forEach(u => unprotected.push(`${htmlName}: ${u}`))
                     warnings.forEach(w => this.warn(`sri-injector: ${htmlName}: ${w}`))
                     if (modified) item.source = out
                 }
 
-                if (htmlCount === 0) {
-                    // Nothing was protected. A build that produces no HTML has nothing for SRI to do, which
-                    // is almost always a misconfiguration (e.g. plugin placed before the HTML is emitted).
-                    const msg = 'sri-injector: No HTML files found in the bundle; no integrity attributes were injected.'
-                    if (strict) this.error(msg)
-                    else this.warn(msg)
-                    return
+                htmlSeen += htmlCount
+                // Remember this output's files for HTML in a later output (HTML itself is rewritten, so skip it)
+                for (const [name, item] of Object.entries(bundle)) {
+                    if (item.type === 'asset' && name.endsWith('.html')) continue
+                    earlierOutputs.set(name, item.type === 'chunk' ? item.code : item.source)
                 }
+                if (htmlCount === 0) return
 
                 if (policyHeader) {
                     if (unprotected.length) {

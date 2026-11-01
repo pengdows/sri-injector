@@ -443,3 +443,22 @@ describe('import map placement when the page has no module script', () => {
     expect(r.html.startsWith('<script type="importmap">')).toBe(true);
   });
 });
+
+describe('crossorigin option', () => {
+  const { injectSri, validateCrossorigin } = require('../core');
+  const html = '<script src="/a.js"></script>';
+  test('defaults to anonymous', async () => {
+    expect((await injectSri(html, () => 'x')).html).toContain('crossorigin="anonymous"');
+  });
+  test('use-credentials is applied when requested', async () => {
+    expect((await injectSri(html, () => 'x', { crossorigin: 'use-credentials' })).html).toContain('crossorigin="use-credentials"');
+  });
+  test('an unsupported value is rejected', async () => {
+    await expect(injectSri(html, () => 'x', { crossorigin: 'sometimes' })).rejects.toThrow(/crossorigin/);
+    expect(() => validateCrossorigin('')).toThrow(/crossorigin/);
+  });
+  test('validateCrossorigin returns supported values unchanged', () => {
+    expect(validateCrossorigin('anonymous')).toBe('anonymous');
+    expect(validateCrossorigin(undefined)).toBe('anonymous');
+  });
+});

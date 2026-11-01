@@ -71,7 +71,8 @@ test('a CDN publicPath is treated as local', async () => {
 
 test('strict fails the build when the bundle contains no HTML', async () => {
   const bundle = await rollup({ input: path.join(dir, 'main.js'), plugins: [sri({ strict: true })] });
-  await expect(bundle.generate({ dir: path.join(dir, 'dist'), format: 'es' })).rejects.toThrow(/No HTML files/);
+  await bundle.generate({ dir: path.join(dir, 'dist'), format: 'es' });
+  await expect(bundle.close()).rejects.toThrow(/No HTML files/);
 });
 
 test('importMap: false leaves lazy chunks out of the page', async () => {

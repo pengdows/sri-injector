@@ -26,7 +26,7 @@ class SubresourceIntegrityInjector {
      * Returns { errors, warnings }: resources that could not be protected, and existing
      * integrity values that were wrong and got replaced.
      */
-    async processFile(filePath, algorithm, outputDir = this.outputDir, base = this.base, resolveExternal = this.resolveExternal) {
+    async processFile(filePath, algorithm, outputDir = this.outputDir, base = this.base, resolveExternal = this.resolveExternal, crossorigin = this.crossorigin) {
         const html = await fs.readFile(filePath, 'utf8')
 
         // URLs under the public base (e.g. "/app/x.js" or "https://cdn.example.com/x.js") and other
@@ -55,7 +55,7 @@ class SubresourceIntegrityInjector {
             }
         }
 
-        const { html: out, modified, errors, warnings, unprotectedScripts } = await core.injectSri(html, resolveAsset, { algorithm, base, resolveExternal })
+        const { html: out, modified, errors, warnings, unprotectedScripts } = await core.injectSri(html, resolveAsset, { algorithm, crossorigin, base, resolveExternal })
         errors.forEach(e => console.error(`Error: ${filePath}: ${e}`))
         warnings.forEach(w => console.warn(`Warning: ${filePath}: ${w}`))
         if (modified) {
@@ -108,6 +108,8 @@ class SubresourceIntegrityInjector {
      * options.base is the public base path or URL the HTML was built for (Vite/Rollup `base`).
      * When it is a full URL, assets under it are hashed instead of being skipped as external.
      *
+     * options.crossorigin ('anonymous' by default, or 'use-credentials') is written to tags that have none.
+     *
      * options.external fetches third-party resources (https://..., //host/...) over the network and
      * pins them too. Resources whose server sends no CORS header are left alone with a warning.
      * options.externalTimeout (ms) bounds each request.
@@ -123,6 +125,7 @@ class SubresourceIntegrityInjector {
         this.outputDir = resolvedDir
         this.algorithm = selected
         this.base = core.normalizeBase(options.base)
+        this.crossorigin = core.validateCrossorigin(options.crossorigin)
         this.resolveExternal = options.external ? createExternalResolver({ timeout: options.externalTimeout }) : undefined
         const policy = core.normalizeIntegrityPolicy(options.integrityPolicy)
         const policyHeader = policy ? core.buildIntegrityPolicyHeader(policy) : undefined
@@ -140,7 +143,7 @@ class SubresourceIntegrityInjector {
             return { files: 0, errors: [], warnings: [], integrityPolicy: policyHeader }
         }
 
-        const results = await Promise.all(htmlFiles.map(file => this.processFile(file, selected, resolvedDir, this.base, this.resolveExternal)))
+        const results = await Promise.all(htmlFiles.map(file => this.processFile(file, selected, resolvedDir, this.base, this.resolveExternal, this.crossorigin)))
         const errors = results.flatMap(r => r.errors)
         const warnings = results.flatMap(r => r.warnings)
 

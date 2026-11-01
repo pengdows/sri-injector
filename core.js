@@ -104,6 +104,16 @@ function validateAlgorithm(name) {
     return selected
 }
 
+const CROSSORIGIN_VALUES = ['anonymous', 'use-credentials']
+
+function validateCrossorigin(value) {
+    if (value === undefined) return 'anonymous'
+    if (!CROSSORIGIN_VALUES.includes(value)) {
+        throw new Error(`Invalid crossorigin value ${JSON.stringify(value)}. Use one of: ${CROSSORIGIN_VALUES.join(', ')}`)
+    }
+    return value
+}
+
 function calculateBase64Hash(content, algorithm) {
     return crypto.createHash(algorithm).update(content).digest('base64')
 }
@@ -245,7 +255,7 @@ function applyImportMapIntegrity($, entries, errors) {
  * @param {(url: string) => Promise<Buffer|string|Uint8Array|null>|Buffer|string|Uint8Array|null} resolveAsset
  *        Returns the exact bytes served for a URL as written in the HTML, null if it does not
  *        exist, or throws to report a problem. It is never called for external URLs.
- * @param {{algorithm?: string, base?: string, resolveExternal?: (url: string) => Promise<Buffer|string|Uint8Array|null>|Buffer|string|Uint8Array|null}} [options]
+ * @param {{algorithm?: string, crossorigin?: 'anonymous'|'use-credentials', base?: string, resolveExternal?: (url: string) => Promise<Buffer|string|Uint8Array|null>|Buffer|string|Uint8Array|null}} [options]
  *        `base` is the public base path or URL the HTML was built for. When it is an absolute URL,
  *        assets under it are treated as local rather than external.
  *        `resolveExternal`, when given, is called for external URLs (https://..., //host/...) with the
@@ -259,8 +269,9 @@ function applyImportMapIntegrity($, entries, errors) {
  *          values that did not match the resource and were replaced; `unprotectedScripts` lists the
  *          src of every <script> that still has no integrity (an Integrity-Policy header would block them).
  */
-async function injectSri(html, resolveAsset, { algorithm = 'sha384', base, resolveExternal, importMapIntegrity } = {}) {
+async function injectSri(html, resolveAsset, { algorithm = 'sha384', crossorigin, base, resolveExternal, importMapIntegrity } = {}) {
     const algo = validateAlgorithm(algorithm)
+    const crossoriginValue = validateCrossorigin(crossorigin)
     const errors = []
     const warnings = []
     // Parse as HTML (not XML) so empty elements serialize as <script ...></script>
@@ -304,7 +315,7 @@ async function injectSri(html, resolveAsset, { algorithm = 'sha384', base, resol
             }
             // Keep an existing crossorigin (e.g. use-credentials)
             if ($el.attr('crossorigin') === undefined) {
-                $el.attr('crossorigin', 'anonymous')
+                $el.attr('crossorigin', crossoriginValue)
                 changed = true
             }
             if (changed) modified = true
@@ -332,4 +343,4 @@ async function injectSri(html, resolveAsset, { algorithm = 'sha384', base, resol
     return { html: modified ? $.html() : html, modified, errors, warnings, unprotectedScripts }
 }
 
-module.exports = { injectSri, SkipResource, buildIntegrityPolicyHeader, normalizeIntegrityPolicy, mergeHeadersFile, isExternal, isLocalUrl, normalizeBase, relativeToBase, toFilePath, isInsideDir, validateAlgorithm, calculateBase64Hash, parseIntegrity, verifyIntegrity }
+module.exports = { injectSri, SkipResource, buildIntegrityPolicyHeader, normalizeIntegrityPolicy, mergeHeadersFile, isExternal, isLocalUrl, normalizeBase, relativeToBase, toFilePath, isInsideDir, validateAlgorithm, validateCrossorigin, calculateBase64Hash, parseIntegrity, verifyIntegrity }

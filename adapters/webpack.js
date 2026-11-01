@@ -1,5 +1,5 @@
 const path = require('path')
-const { injectSri, normalizeBase, validateAlgorithm, buildIntegrityPolicyHeader, normalizeIntegrityPolicy, mergeHeadersFile } = require('../core')
+const { injectSri, normalizeBase, validateAlgorithm, validateCrossorigin, buildIntegrityPolicyHeader, normalizeIntegrityPolicy, mergeHeadersFile } = require('../core')
 const { createExternalResolver } = require('../external')
 const { outputPathFor, sourceToString } = require('./shared')
 
@@ -12,7 +12,9 @@ const PLUGIN_NAME = 'sri-injector'
  * the final emitted bytes and plugin order in `plugins` does not matter.
  *
  * Options mirror the Rollup/Vite plugin where they apply:
+ *  - enabled:   set to false to turn the plugin off. Default true.
  *  - algorithm: 'sha256' | 'sha384' (default) | 'sha512'
+ *  - crossorigin: 'anonymous' (default) | 'use-credentials', written to tags that have none
  *  - strict:    fail the build (instead of warning) if a local resource cannot be resolved or there is no HTML
  *  - base:      public base path or URL; defaults to output.publicPath (when it is a string, not 'auto')
  *  - external / externalTimeout: also fetch and pin third-party resources
@@ -25,6 +27,7 @@ class SriWebpackPlugin {
     constructor(options = {}) {
         this.options = options
         this.algorithm = validateAlgorithm(options.algorithm || 'sha384')
+        this.crossorigin = validateCrossorigin(options.crossorigin)
         this.policy = normalizeIntegrityPolicy(options.integrityPolicy)
         this.policyHeader = this.policy ? buildIntegrityPolicyHeader(this.policy) : null
     }
@@ -32,7 +35,8 @@ class SriWebpackPlugin {
     apply(compiler) {
         const { webpack } = compiler
         const { RawSource } = webpack.sources
-        const { strict = false, external = false, externalTimeout } = this.options
+        const { strict = false, external = false, externalTimeout, enabled = true } = this.options
+        if (!enabled) return
 
         compiler.hooks.thisCompilation.tap(PLUGIN_NAME, (compilation) => {
             compilation.hooks.processAssets.tapPromise(
@@ -66,7 +70,7 @@ class SriWebpackPlugin {
 
                         const { html: out, modified, errors, warnings, unprotectedScripts } = await injectSri(
                             sourceToString(source.source()), resolveAsset,
-                            { algorithm: this.algorithm, base: prefix, resolveExternal }
+                            { algorithm: this.algorithm, crossorigin: this.crossorigin, base: prefix, resolveExternal }
                         )
                         errors.forEach(e => allErrors.push(`${htmlName}: ${e}`))
                         unprotectedScripts.forEach(u => unprotected.push(`${htmlName}: ${u}`))

@@ -18,7 +18,7 @@ Existing `integrity` attributes are **verified** against the actual bytes and ke
 
 ## CLI (post-build)
 
-    npx sri-injector ./dist [--algo sha384] [--strict] [--base /app/ | https://cdn.example.com/] [--external] [--integrity-policy [enforce|report-only]] [--headers-file _headers]
+    npx sri-injector ./dist [--algo sha384] [--crossorigin anonymous|use-credentials] [--strict] [--base /app/ | https://cdn.example.com/] [--external] [--integrity-policy [enforce|report-only]] [--headers-file _headers]
 
 Pass `--base` when the HTML was built with a non-root Vite/Rollup `base`. With a full URL, assets under it (your own CDN) are hashed instead of being skipped as third-party externals.
 
@@ -85,7 +85,9 @@ Options:
 
 | option      | default    | notes |
 |-------------|------------|-------|
+| `enabled`   | `true`     | set to `false` to turn the plugin off (for example in a watch build) |
 | `algorithm` | `'sha384'` | `sha256`, `sha384` or `sha512` |
+| `crossorigin` | `'anonymous'` | `'anonymous'` or `'use-credentials'`, written to tags that have no `crossorigin` (an existing one is kept) |
 | `strict`    | `false`    | fail the build if a referenced local resource cannot be resolved, or if the bundle contains no HTML. Otherwise these are Rollup warnings. |
 | `base`      | `'/'`      | public base path or full URL (Vite sets this automatically). A URL base marks assets under it as local so they get hashed. |
 | `publicDir` | —          | directory checked for files referenced by the HTML but not in the bundle (Vite sets this automatically) |
@@ -105,7 +107,9 @@ Browsers apply those hashes to any module fetch for that URL that has no integri
 
 Import-map `integrity` is supported in Chromium 127+ and recent Safari/Firefox; older browsers ignore the unknown key (no protection, no breakage). [es-module-shims](https://github.com/guybedford/es-module-shims) polyfills it if you need coverage there.
 
-Use `strict: true` in CI. With multiple `output` targets, `generateBundle` runs once per target; if only one of them carries the HTML, scope the plugin to that output or leave `strict` off for the others.
+Use `strict: true` in CI.
+
+**Multiple outputs and `@vitejs/plugin-legacy`.** A build can have several outputs; `@vitejs/plugin-legacy` builds its legacy chunks in a separate output *before* the output that contains the HTML. The plugin remembers the files of earlier outputs, so the legacy polyfill `<script>` still gets its hash, and it decides whether the build produced any HTML once, when the build closes, so an output with no HTML does not fail `strict`. (The legacy *entry* is loaded through `data-src` by an inline loader, so no tag can carry its hash.)
 
 ## webpack plugin
 
@@ -123,7 +127,7 @@ Use `strict: true` in CI. With multiple `output` targets, `generateBundle` runs 
 
 It hashes every `.html` asset in the compilation after `html-webpack-plugin` has emitted it, in `processAssets` at `PROCESS_ASSETS_STAGE_OPTIMIZE_TRANSFER`, so the hashes cover the final emitted bytes and the order of `plugins` does not matter. Problems are webpack warnings, or errors with `strict: true`.
 
-Options: `algorithm`, `strict`, `base` (defaults to `output.publicPath` when that is a string other than `'auto'`; relative and full-URL public paths work), `external`, `externalTimeout` and `integrityPolicy` (with `headersFile` it emits a `_headers` asset). There is no `importMap` option: see Limitations.
+Options: `enabled`, `algorithm`, `crossorigin`, `strict`, `base` (defaults to `output.publicPath` when that is a string other than `'auto'`; relative and full-URL public paths work), `external`, `externalTimeout` and `integrityPolicy` (with `headersFile` it emits a `_headers` asset). There is no `importMap` option: see Limitations.
 
 ## Examples
 
