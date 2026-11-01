@@ -18,11 +18,17 @@ Existing `integrity` attributes are **verified** against the actual bytes and ke
 
 ## CLI (post-build)
 
-    npx sri-injector ./dist [--algo sha384] [--crossorigin anonymous|use-credentials] [--strict] [--base /app/ | https://cdn.example.com/] [--external] [--integrity-policy [enforce|report-only]] [--headers-file _headers]
+    npx sri-injector ./dist [--algo sha384] [--crossorigin anonymous|use-credentials] [--strict] [--base /app/ | https://cdn.example.com/] [--external] [--integrity-policy | --integrity-policy-report-only] [--headers-file _headers]
 
 Pass `--base` when the HTML was built with a non-root Vite/Rollup `base`. With a full URL, assets under it (your own CDN) are hashed instead of being skipped as third-party externals.
 
 Recursively rewrites every `.html` file under the directory. Exits 1 if any local resource is missing or rejected (a failure count is printed; resolvable resources are still rewritten), so a post-build step in webpack/rollup/CI fails rather than shipping HTML without integrity. `--strict` additionally exits 1 when no HTML files are found at all.
+
+**One rule everywhere.** The CLI, the Rollup/Vite plugin and the webpack plugin share one rule: a local resource that cannot be hashed (missing, unreadable, outside the output directory) is an error that fails the run, and `strict` only adds "no HTML at all" to the failures. Warnings (a wrong existing `integrity` that was replaced, a third-party server without CORS) never fail it. A script the build does not own, such as one your server generates, can opt out with the `skip-sri` attribute:
+
+    <script src="/runtime-config.js" skip-sri></script>
+
+The tag is left alone and the `skip-sri` marker is removed from the output. (Under an `Integrity-Policy` it still counts as an uncovered script.)
 
 ## Third-party resources (`--external` / `external: true`)
 
@@ -51,6 +57,8 @@ SRI only protects the tags that carry it. The [`Integrity-Policy`](https://w3c.g
 The header only affects scripts the browser fetches; inline scripts are untouched. Scripts that your own JS or a third-party tag manager inserts at runtime without integrity **will** be blocked, and no build-time audit can see those, which is what report-only mode is for.
 
 ## Vite plugin
+
+`sri-injector/vite` is the Rollup plugin below plus what only Vite provides: it reads `base` and `publicDir` from Vite's resolved config, runs last, and sets the `Integrity-Policy` header on `vite preview`. Use `sri-injector/rollup` for plain Rollup.
 
     // vite.config.js
     import sri from 'sri-injector/vite'
@@ -88,7 +96,7 @@ Options:
 | `enabled`   | `true`     | set to `false` to turn the plugin off (for example in a watch build) |
 | `algorithm` | `'sha384'` | `sha256`, `sha384` or `sha512` |
 | `crossorigin` | `'anonymous'` | `'anonymous'` or `'use-credentials'`, written to tags that have no `crossorigin` (an existing one is kept) |
-| `strict`    | `false`    | fail the build if a referenced local resource cannot be resolved, or if the bundle contains no HTML. Otherwise these are Rollup warnings. |
+| `strict`    | `false`    | also fail the build when no output contained HTML. Unresolvable local resources always fail it (see "One rule everywhere"). |
 | `base`      | `'/'`      | public base path or full URL (Vite sets this automatically). A URL base marks assets under it as local so they get hashed. |
 | `publicDir` | —          | directory checked for files referenced by the HTML but not in the bundle (Vite sets this automatically) |
 | `importMap` | `true`     | add an import map `integrity` section covering code-split chunks (see below) |
@@ -107,7 +115,7 @@ Browsers apply those hashes to any module fetch for that URL that has no integri
 
 Import-map `integrity` is supported in Chromium 127+ and recent Safari/Firefox; older browsers ignore the unknown key (no protection, no breakage). [es-module-shims](https://github.com/guybedford/es-module-shims) polyfills it if you need coverage there.
 
-Use `strict: true` in CI.
+Use `strict: true` in CI. Option names are checked: an unknown key such as `strcit` is rejected at configuration time, so a typo cannot silently turn a safeguard off.
 
 **Multiple outputs and `@vitejs/plugin-legacy`.** A build can have several outputs; `@vitejs/plugin-legacy` builds its legacy chunks in a separate output *before* the output that contains the HTML. The plugin remembers the files of earlier outputs, so the legacy polyfill `<script>` still gets its hash, and it decides whether the build produced any HTML once, when the build closes, so an output with no HTML does not fail `strict`. (The legacy *entry* is loaded through `data-src` by an inline loader, so no tag can carry its hash.)
 
@@ -125,7 +133,7 @@ Use `strict: true` in CI.
       ]
     }
 
-It hashes every `.html` asset in the compilation after `html-webpack-plugin` has emitted it, in `processAssets` at `PROCESS_ASSETS_STAGE_OPTIMIZE_TRANSFER`, so the hashes cover the final emitted bytes and the order of `plugins` does not matter. Problems are webpack warnings, or errors with `strict: true`.
+It hashes every `.html` asset in the compilation after `html-webpack-plugin` has emitted it, in `processAssets` at `PROCESS_ASSETS_STAGE_OPTIMIZE_TRANSFER`, so the hashes cover the final emitted bytes and the order of `plugins` does not matter. Unresolvable resources are webpack errors; `strict: true` additionally fails the build when there is no HTML.
 
 Options: `enabled`, `algorithm`, `crossorigin`, `strict`, `base` (defaults to `output.publicPath` when that is a string other than `'auto'`; relative and full-URL public paths work), `external`, `externalTimeout` and `integrityPolicy` (with `headersFile` it emits a `_headers` asset). There is no `importMap` option: see Limitations.
 
@@ -137,7 +145,9 @@ Options: `enabled`, `algorithm`, `crossorigin`, `strict`, `base` (defaults to `o
 
 `injectSri(html, resolveAsset, { algorithm })` is a pure function; `resolveAsset(url)` returns the served bytes (or `null`). Use it to write other adapters.
 
-`new SubresourceIntegrityInjector().insertSRIInHTML(dir, algorithm, { strict })` (the CLI's engine) resolves to `{ files, errors }` — the number of HTML files processed and the per-resource error messages.
+`new SubresourceIntegrityInjector().insertSRIInHTML(dir, algorithm, options)` (the CLI's engine) resolves to `{ files, errors, warnings, integrityPolicy }`: the number of HTML files processed, the problems as `file: message` strings and the prepared header. It never throws for resource errors unless `strict` is set; the caller decides what is fatal (the CLI exits 1 on any error).
+
+The pieces every adapter is built from are exported too: `processPages(pages, config, runtime)` (the shared pipeline: pages in, rewritten pages and structured diagnostics out), `resolveOptions(options)` (the one place options are validated), `processDirectory(dir, options)` (the filesystem host) and, from `sri-injector/core`, the diagnostics helpers (`classify`, `formatFatal`, `CODES`). Write a new adapter by supplying how to find an asset, how to store a page and how to report diagnostics; see `adapters/rollup.js` and `adapters/webpack.js` for the two bundler hosts.
 
 ## Limitations
 

@@ -6,7 +6,7 @@ import { build } from 'vite'
 import legacy from '@vitejs/plugin-legacy'
 
 const require = createRequire(import.meta.url)
-const sri = require('../../adapters/rollup.js')
+const sri = require('../../adapters/vite.js')
 const [root, mode] = process.argv.slice(2)
 
 const config = {

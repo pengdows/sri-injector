@@ -20,8 +20,13 @@ async function runWithPublicDir(html) {
   const warnings = [];
   const self = { error: (m) => { throw new Error(m); }, warn: (m) => warnings.push(m) };
   const bundle = { 'index.html': { type: 'asset', fileName: 'index.html', source: html } };
-  await plugin.generateBundle.handler.call(self, {}, bundle);
-  return { html: bundle['index.html'].source, warnings };
+  let error;
+  try {
+    await plugin.generateBundle.handler.call(self, {}, bundle);
+  } catch (e) {
+    error = e.message; // unresolvable resources fail the build; the page itself is left untouched
+  }
+  return { html: bundle['index.html'].source, warnings, error };
 }
 
 let reads;
@@ -38,12 +43,12 @@ test('sanity: the mock is in effect', () => {
 });
 
 test('backslash traversal that passes the bundle-root check is stopped by the publicDir guard', async () => {
-  const { html, warnings } = await runWithPublicDir(
+  const { html, error } = await runWithPublicDir(
     '<html><head><script src="/..\\secret.txt"></script><script src="/assets\\..\\..\\secret.txt"></script></head></html>'
   );
   expect(reads).toEqual([]);
   expect(html).not.toContain('integrity=');
-  expect(warnings.join('\n')).toMatch(/secret\.txt.*could not be found/);
+  expect(error).toMatch(/secret\.txt.*could not be found/);
 });
 
 test('a publicDir file named "..foo.js" is still read under Windows separators', async () => {

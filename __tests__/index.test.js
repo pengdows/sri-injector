@@ -274,7 +274,7 @@ describe('Integrity-Policy', () => {
     test('integrityPolicy: true turns unprotected scripts into errors even without strict', async () => {
         fs.writeFileSync(HTML_FILE, '<html><head><script src="https://third.example.net/a.js"></script><script src="test.js"></script></head><body></body></html>');
         const result = await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256', { integrityPolicy: true });
-        expect(result.errors).toEqual([expect.stringMatching(/Integrity-Policy[\s\S]*third\.example\.net\/a\.js/)]);
+        expect(result.errors).toEqual([expect.stringMatching(/third\.example\.net\/a\.js.*Integrity-Policy/)]);
         expect(result.integrityPolicy).toEqual({ name: 'Integrity-Policy', value: 'blocked-destinations=(script), sources=(inline)' });
     });
 
@@ -300,23 +300,6 @@ describe('Integrity-Policy', () => {
         expect(result.integrityPolicy).toBeUndefined();
         expect(fs.existsSync(path.join(TEST_DIR, '_headers'))).toBe(false);
     });
-});
-
-describe('SubresourceIntegrityInjector helper methods', () => {
-  const s = new SubresourceIntegrityInjector();
-  test('validateHashName accepts supported algorithms and rejects others', () => {
-    expect(s.validateHashName('sha512')).toBe('sha512');
-    expect(() => s.validateHashName('md5')).toThrow(/Unsupported hash algorithm/);
-  });
-  test('isExternal and toFilePath delegate to the shared rules', () => {
-    expect(s.isExternal('https://x.test/a.js')).toBe(true);
-    expect(s.isExternal('/a.js')).toBe(false);
-    expect(s.toFilePath('/a%20b.js?v=1')).toBe('/a b.js');
-  });
-  test('calculateBase64Hash matches a known digest', () => {
-    // sha256("abc") base64
-    expect(s.calculateBase64Hash('abc', 'sha256')).toBe('ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=');
-  });
 });
 
 test('rejects when the output directory does not exist', async () => {

@@ -59,7 +59,7 @@ describe('manifest', () => {
 describe('published files', () => {
   test('includes everything the entry points need', () => {
     for (const f of ['package.json', 'README.md', 'index.js', 'core.js', 'external.js', 'HashAlgo.js',
-      'SubresourceIntegrityInjector.js', 'bin/cli.js', 'adapters/rollup.js', 'adapters/webpack.js', 'adapters/shared.js']) {
+      'SubresourceIntegrityInjector.js', 'bin/cli.js', 'adapters/rollup.js', 'adapters/webpack.js', 'lib/url.js', 'lib/html.js', 'lib/source.js']) {
       expect(packed.files).toContain(f);
     }
   });

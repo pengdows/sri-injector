@@ -11,18 +11,6 @@ function parseTimeout(value) {
   return parseInt(value, 10);
 }
 
-// `--integrity-policy [mode]` takes an optional value, and commander would otherwise treat the next
-// positional (the output dir) as that value. Only "enforce"/"report-only" count as a mode; anything
-// else after a bare flag is left for the positional argument.
-const MODES = ['enforce', 'report-only'];
-const argv = process.argv.slice();
-argv.forEach((arg, i) => {
-  const next = argv[i + 1];
-  if (arg === '--integrity-policy' && next !== undefined && !next.startsWith('-') && !MODES.includes(next)) {
-    argv[i] = '--integrity-policy=enforce';
-  }
-});
-
 program
   .version(pkg.version)
   .description('Inject Subresource Integrity (SRI) attributes into HTML files.')
@@ -33,18 +21,14 @@ program
   .option('-b, --base <pathOrUrl>', 'Public base the HTML was built for (e.g. /app/ or https://cdn.example.com/). With a URL, assets under it are hashed instead of skipped as external', '/')
   .option('--external', 'Also fetch third-party resources (https://..., //host/...) and pin them. Servers without CORS headers are skipped with a warning', false)
   .option('--external-timeout <ms>', 'Per-request timeout for --external', parseTimeout, 10000)
-  .option('--integrity-policy [mode]', 'Prepare the Integrity-Policy response header ("enforce" or "report-only"). Any script still without integrity becomes an error, since the header would make browsers block it')
-  .option('--headers-file <path>', 'With --integrity-policy: write the header into this Netlify/Cloudflare-style _headers file (relative to outputDir)')
+  .option('--integrity-policy', 'Prepare the Integrity-Policy response header. Any script still without integrity becomes an error, since the header would make browsers block it', false)
+  .option('--integrity-policy-report-only', 'Like --integrity-policy, but prepare Integrity-Policy-Report-Only, which reports violations without blocking (use it to roll the policy out)', false)
+  .option('--headers-file <path>', 'With either policy flag: write the header into this Netlify/Cloudflare-style _headers file (relative to outputDir)')
   .action((outputDir, options) => {
     const injector = new SubresourceIntegrityInjector();
-    const integrityPolicy = options.integrityPolicy
-      ? { reportOnly: options.integrityPolicy === 'report-only', headersFile: options.headersFile }
+    const integrityPolicy = options.integrityPolicy || options.integrityPolicyReportOnly
+      ? { reportOnly: options.integrityPolicyReportOnly, headersFile: options.headersFile }
       : undefined;
-    if (options.integrityPolicy && !['enforce', 'report-only', true].includes(options.integrityPolicy)) {
-      console.error(`\n❌ --integrity-policy must be "enforce" or "report-only", got "${options.integrityPolicy}"`);
-      process.exitCode = 1;
-      return;
-    }
     injector.insertSRIInHTML(outputDir, options.algo, {
       strict: options.strict,
       crossorigin: options.crossorigin,
@@ -78,4 +62,4 @@ program
       });
   });
 
-program.parse(argv);
+program.parse(process.argv);

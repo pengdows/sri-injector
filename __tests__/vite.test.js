@@ -2,14 +2,15 @@
  * Real Vite builds (Vite 8), including @vitejs/plugin-legacy, which builds its legacy chunks in a
  * separate output pass before the HTML pass. Run in a child process because Vite is ESM-only.
  */
-const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 const HELPER = path.join(__dirname, 'helpers', 'vite-build.mjs');
-const sha384 = (bytes) => 'sha384-' + crypto.createHash('sha384').update(bytes).digest('base64');
+const { integrity, scriptTags: tags, attr } = require('./helpers/html');
+
+const sha384 = (bytes) => integrity('sha384', bytes);
 
 let root;
 beforeEach(() => {
@@ -26,8 +27,6 @@ const build = (mode) => {
   return { code: r.status, out: r.stdout + r.stderr };
 };
 const dist = (...p) => path.join(root, 'dist', ...p);
-const tags = (html) => [...html.matchAll(/<script[^>]*>/g)].map(m => m[0]);
-const attr = (tag, name) => (new RegExp(`${name}="?([^" >]*)"?`).exec(tag) || [])[1];
 
 jest.setTimeout(120000);
 

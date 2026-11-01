@@ -141,9 +141,9 @@ describe('--integrity-policy', () => {
     expect(r.stdout).toContain('Integrity-Policy: blocked-destinations=(script), sources=(inline)');
   });
 
-  test('report-only mode prints the report-only header', () => {
+  test('report-only flag prints the report-only header', () => {
     fs.writeFileSync(path.join(dir, 'index.html'), html('ok.js'));
-    const r = runCli(dir, '--integrity-policy', 'report-only');
+    const r = runCli(dir, '--integrity-policy-report-only');
     expect(r.code).toBe(0);
     expect(r.stdout).toContain('Integrity-Policy-Report-Only: blocked-destinations=(script), sources=(inline)');
   });
@@ -152,7 +152,7 @@ describe('--integrity-policy', () => {
     fs.writeFileSync(path.join(dir, 'index.html'), html('ok.js', 'https://third.example.net/a.js'));
     const r = runCli(dir, '--integrity-policy');
     expect(r.code).toBe(1);
-    expect(r.stderr).toMatch(/Integrity-Policy[\s\S]*third\.example\.net\/a\.js/);
+    expect(r.stderr).toMatch(/third\.example\.net\/a\.js.*Integrity-Policy/);
   });
 
   test('--headers-file writes the header in _headers format', () => {
@@ -184,18 +184,18 @@ describe('argument handling', () => {
     expect(r.out).toContain('Integrity-Policy: blocked-destinations=(script)');
   });
 
-  test('--integrity-policy report-only before the directory still selects the mode', () => {
+  test('--integrity-policy-report-only selects the report-only header, wherever it is written', () => {
     fs.writeFileSync(path.join(dir, 'index.html'), html('ok.js'));
-    const r = spawnArgs('--integrity-policy', 'report-only', dir);
+    const r = spawnArgs('--integrity-policy-report-only', dir);
     expect(r.code).toBe(0);
     expect(r.out).toContain('Integrity-Policy-Report-Only:');
   });
 
-  test('an unknown --integrity-policy mode written with = is still rejected', () => {
+  test('--integrity-policy takes no value, so a typo cannot be mistaken for a mode', () => {
     fs.writeFileSync(path.join(dir, 'index.html'), html('ok.js'));
-    const r = spawnArgs(dir, '--integrity-policy=bogus');
-    expect(r.code).toBe(1);
-    expect(r.out).toMatch(/enforce.*report-only/);
+    const r = spawnArgs(dir, '--integrity-policy=report_only');
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/--integrity-policy/);
   });
 
   test('--headers-file outside the output directory is rejected and nothing is written', () => {

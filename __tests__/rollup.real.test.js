@@ -2,13 +2,13 @@
  * Real Rollup builds (not mock bundles), using the exact setup the README documents:
  * @rollup/plugin-html emits the page and this plugin is listed last.
  */
-const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { rollup } = require('rollup');
 const html = require('@rollup/plugin-html');
 const sri = require('../adapters/rollup');
+const { integrity } = require('./helpers/html');
 
 let dir;
 beforeEach(() => {
@@ -18,7 +18,7 @@ beforeEach(() => {
 });
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-const sha = (algo, code) => `${algo}-${crypto.createHash(algo).update(code).digest('base64')}`;
+const sha = integrity;
 
 async function build({ sriOptions = {}, htmlOptions = {}, sriFirst = false } = {}) {
   const warnings = [];

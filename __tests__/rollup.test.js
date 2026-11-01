@@ -1,7 +1,8 @@
-const crypto = require('crypto');
 const sriPlugin = require('../adapters/rollup');
 
-const sha = (c) => 'sha256-' + crypto.createHash('sha256').update(c).digest('base64');
+const { integrity } = require('./helpers/html');
+
+const sha = (c) => integrity('sha256', c);
 
 async function run(bundle, opts = {}, ctx = {}) {
   const plugin = sriPlugin({ algorithm: 'sha256', ...opts });
@@ -14,7 +15,6 @@ async function run(bundle, opts = {}, ctx = {}) {
     info: (m) => infos.push(m),
     emitFile: (f) => { emitted.push(f); bundle[f.fileName] = { type: 'asset', fileName: f.fileName, source: f.source }; },
   };
-  if (plugin.configResolved && ctx.config) plugin.configResolved(ctx.config);
   await plugin.generateBundle.handler.call(self, {}, bundle);
   if (plugin.closeBundle) await plugin.closeBundle.call(self);
   return warnings;
@@ -46,11 +46,43 @@ test('hashes modulepreload links', async () => {
   expect(b['index.html'].source).toContain('integrity="sha256-');
 });
 
-test('strict fails the build on a missing resource; default warns', async () => {
+test('a missing resource fails the build, strict or not (same rule as the CLI and the webpack plugin)', async () => {
   const html = '<html><head><script src="/assets/missing.js"></script></head></html>';
   await expect(run(makeBundle(html), { strict: true })).rejects.toThrow(/missing\.js/);
-  const warnings = await run(makeBundle(html));
-  expect(warnings.join()).toMatch(/missing\.js/);
+  await expect(run(makeBundle(html))).rejects.toThrow(/1 resource\(s\) could not be processed[\s\S]*index\.html: The linked resource "\/assets\/missing\.js"/);
+});
+
+test('skip-sri opts a tag out, so a script the build does not own cannot fail the build', async () => {
+  const b = makeBundle('<html><head><script src="/runtime-config.js" skip-sri></script><script src="/assets/app-abc.js"></script></head></html>');
+  await run(b);
+  expect(b['index.html'].source).toContain('<script src="/runtime-config.js"></script>');
+  expect(b['index.html'].source).toContain(`integrity="${sha('console.log(1)')}"`);
+});
+
+test('unknown options are rejected at configuration time', () => {
+  expect(() => sriPlugin({ strcit: true })).toThrow(/Unknown option "strcit"/);
+});
+
+test('third-party resources are fetched once per build, even across several outputs', async () => {
+  const calls = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return { status: 200, ok: true, headers: { get: () => '*' }, arrayBuffer: async () => new TextEncoder().encode('lib').buffer };
+  };
+  try {
+    const plugin = sriPlugin({ algorithm: 'sha256', external: true });
+    const self = { error: (m) => { throw new Error(m); }, warn: () => {}, info: () => {}, emitFile: () => {} };
+    const page = () => ({ 'index.html': { type: 'asset', fileName: 'index.html', source: '<html><head><script src="https://cdn.test/lib.js"></script></head></html>' } });
+    await plugin.generateBundle.handler.call(self, {}, page());
+    await plugin.generateBundle.handler.call(self, {}, page());
+    expect(calls).toEqual(['https://cdn.test/lib.js']);
+    plugin.closeBundle.call(self);
+    await plugin.generateBundle.handler.call(self, {}, page());
+    expect(calls).toHaveLength(2); // a new build starts with a fresh cache
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 
 describe('bundle with no HTML', () => {
@@ -124,7 +156,7 @@ describe('publicDir fallback', () => {
         '/..pub.js', // control: legitimately inside, must be read
       ];
       const b = makeBundle(`<html><head>${urls.map(u => `<script src="${u}"></script>`).join('')}</head></html>`);
-      await run(b, { publicDir });
+      await run(b, { publicDir }).catch(() => {}); // the traversal URLs fail the build; what matters is what was read
 
       expect(reads.length).toBeGreaterThan(0);
       for (const p of reads) {
@@ -153,7 +185,7 @@ describe('absolute-URL base (CDN deployments)', () => {
 
   test('picks the URL base up from Vite\'s resolved config', async () => {
     const b = makeBundle(cdnHtml);
-    await run(b, { strict: true }, { config: { base: CDN } });
+    await run(b, { strict: true, base: CDN });
     expect(b['index.html'].source.match(/integrity="/g)).toHaveLength(2);
   });
 
@@ -315,8 +347,6 @@ describe('Integrity-Policy', () => {
   const HEADER = 'Integrity-Policy: blocked-destinations=(script), sources=(inline)';
 
   test('off by default: nothing emitted, no preview header, externals merely skipped', async () => {
-    const plugin = sriPlugin({});
-    expect(plugin.config ? plugin.config({}) : undefined).toBeUndefined();
     const emitted = [];
     await run(makeBundle('<html><head><script src="https://third.example.net/a.js"></script></head></html>'), { strict: true }, { emitted });
     expect(emitted).toEqual([]);
@@ -367,11 +397,6 @@ describe('Integrity-Policy', () => {
     expect(emitted[0].source).toContain('Integrity-Policy-Report-Only: blocked-destinations=(script), sources=(inline), endpoints=(integrity)');
   });
 
-  test('Vite: sets the header on the preview server only (dev serves unhashed source modules)', () => {
-    const cfg = sriPlugin({ integrityPolicy: true }).config({});
-    expect(cfg).toEqual({ preview: { headers: { 'Integrity-Policy': 'blocked-destinations=(script), sources=(inline)' } } });
-    expect(sriPlugin({ integrityPolicy: 'report-only' }).config({}).preview.headers).toHaveProperty('Integrity-Policy-Report-Only');
-  });
 });
 
 describe('Uint8Array asset sources', () => {
@@ -458,9 +483,8 @@ describe('multi-output builds (e.g. @vitejs/plugin-legacy builds legacy chunks i
     await t.pass(htmlOutput());
     await t.close();
     const html = htmlOutput();
-    await t.pass(html);
+    await expect(t.pass(html)).rejects.toThrow(/polyfills-legacy\.js/);
     expect(html['index.html'].source).not.toContain('integrity=');
-    expect(t.warnings.join('\n')).toMatch(/polyfills-legacy\.js/);
   });
 });
 

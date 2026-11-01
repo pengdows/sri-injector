@@ -2,7 +2,6 @@
  * Runs real webpack + html-webpack-plugin builds and checks the emitted HTML against the
  * emitted bytes, so these tests fail if the stage ordering or hashing is wrong, not just if a mock is.
  */
-const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -18,7 +17,7 @@ beforeEach(() => {
 });
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-const sha = (algo, bytes) => `${algo}-${crypto.createHash(algo).update(bytes).digest('base64')}`;
+const { integrity: sha, scriptTags, attr } = require('./helpers/html');
 
 function build({ sriOptions = {}, output = {}, html = {}, sriFirst = false } = {}) {
   const sri = new SriWebpackPlugin(sriOptions);
@@ -47,8 +46,6 @@ function build({ sriOptions = {}, output = {}, html = {}, sriFirst = false } = {
   });
 }
 
-const scriptTags = (htmlText) => [...htmlText.matchAll(/<script[^>]*>/g)].map(m => m[0]);
-const attr = (tag, name) => (new RegExp(`${name}="([^"]*)"`).exec(tag) || [])[1];
 
 test('every emitted script tag carries the hash of the emitted bytes', async () => {
   const r = await build();
@@ -98,13 +95,18 @@ test('a full-URL publicPath hashes assets under it instead of skipping them as e
 describe('unresolvable resources', () => {
   const html = { templateContent: '<html><head></head><body><script src="/missing.js"></script></body></html>' };
 
-  test('are webpack warnings by default', async () => {
+  test('fail the build by default (same rule as the CLI and the Rollup/Vite plugin)', async () => {
     const r = await build({ html });
-    expect(r.errors).toEqual([]);
-    expect(r.warnings.join('\n')).toMatch(/missing\.js/);
+    expect(r.errors.join('\n')).toMatch(/1 resource\(s\) could not be processed[\s\S]*missing\.js/);
   });
 
-  test('fail the build with strict: true', async () => {
+  test('skip-sri opts a tag out', async () => {
+    const r = await build({ html: { templateContent: '<html><head></head><body><script src="/runtime-config.js" skip-sri></script></body></html>' } });
+    expect(r.errors).toEqual([]);
+    expect(r.read('index.html').toString('utf8')).not.toMatch(/skip-sri/);
+  });
+
+  test('strict keeps failing too', async () => {
     const r = await build({ html, sriOptions: { strict: true } });
     expect(r.errors.join('\n')).toMatch(/missing\.js/);
   });
@@ -146,6 +148,10 @@ describe('integrityPolicy', () => {
   test('a headersFile outside the output directory is rejected at configuration time', () => {
     expect(() => new SriWebpackPlugin({ integrityPolicy: { headersFile: '../_headers' } })).toThrow(/headers file/i);
   });
+});
+
+test('unknown options are rejected at configuration time', () => {
+  expect(() => new SriWebpackPlugin({ strcit: true })).toThrow(/Unknown option "strcit"/);
 });
 
 test('an unsupported algorithm is rejected at configuration time', () => {

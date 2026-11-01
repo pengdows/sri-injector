@@ -25,7 +25,7 @@
   "exports": {
     ".": "./index.js",
     "./rollup": "./adapters/rollup.js",
-    "./vite": "./adapters/rollup.js",
+    "./vite": "./adapters/vite.js",
     "./webpack": "./adapters/webpack.js",
     "./core": "./core.js",
     "./external": "./external.js",
@@ -38,7 +38,8 @@
     "HashAlgo.js",
     "SubresourceIntegrityInjector.js",
     "bin/",
-    "adapters/"
+    "adapters/",
+    "lib/"
   ],
   "engines": {
     "node": ">=18"
@@ -86,6 +87,7 @@
     "collectCoverageFrom": [
       "*.js",
       "adapters/**/*.js",
+      "lib/**/*.js",
       "!jest.config.js"
     ],
     "coverageReporters": [
@@ -98,6 +100,10 @@
         "functions": 98,
         "branches": 90
       }
-    }
+    },
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/__tests__/helpers/"
+    ]
   }
 }

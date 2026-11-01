@@ -1,4 +1,4 @@
-const { SkipResource } = require('./core')
+const { SkipResource } = require('./lib/errors')
 
 // Sent with every request so servers with dynamic CORS (Vary: Origin) answer with a header.
 // The real page origin is unknown at build time; public CDNs answer "*" or echo whatever is sent.
