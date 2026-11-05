@@ -145,6 +145,51 @@ describe('integrityPolicy', () => {
     expect(r.errors.join('\n')).toMatch(/third\.example\.net\/a\.js[\s\S]*Integrity-Policy|Integrity-Policy[\s\S]*third\.example\.net\/a\.js/);
   });
 
+  describe('lazy chunks', () => {
+    // webpack's classic chunk loader creates <script> elements at runtime; they carry no integrity,
+    // so under an enforcing policy the browser would block every lazily loaded chunk.
+    const withLazyChunk = () => {
+      fs.writeFileSync(path.join(dir, 'src', 'index.js'), 'import("./lazy.js").then(m => m.default()); console.log("main");');
+      fs.writeFileSync(path.join(dir, 'src', 'lazy.js'), 'export default () => console.log("lazy");');
+    };
+    const lazyFile = (r) => r.stats.compilation.getAssets().map(a => a.name).find(n => /^\d+\..*\.js$/.test(n));
+
+    test('an enforcing policy fails the build and names the lazy chunk', async () => {
+      withLazyChunk();
+      const r = await build({ sriOptions: { integrityPolicy: true } });
+      const lazy = lazyFile(r);
+      expect(lazy).toBeDefined();
+      expect(r.errors.join('\n')).toContain('1 chunk(s) are loaded at runtime without integrity');
+      expect(r.errors.join('\n')).toContain(lazy);
+    });
+
+    test('the headers file is not emitted for a build that would be blocked', async () => {
+      withLazyChunk();
+      const r = await build({ sriOptions: { integrityPolicy: { headersFile: '_headers' } } });
+      expect(r.errors).not.toEqual([]);
+      expect(r.exists('_headers')).toBe(false);
+    });
+
+    test('report-only only warns, since nothing is blocked', async () => {
+      withLazyChunk();
+      const r = await build({ sriOptions: { integrityPolicy: 'report-only' } });
+      expect(r.errors).toEqual([]);
+      expect(r.warnings.join('\n')).toContain(lazyFile(r));
+    });
+
+    test('without a policy, lazy chunks raise nothing', async () => {
+      withLazyChunk();
+      const r = await build();
+      expect(r.errors).toEqual([]);
+      expect(r.warnings).toEqual([]);
+    });
+
+    test('a policy with no lazy chunks is fine', async () => {
+      const r = await build({ sriOptions: { integrityPolicy: true } });
+      expect(r.errors).toEqual([]);
+    });
+  });
+
   test('a headersFile outside the output directory is rejected at configuration time', () => {
     expect(() => new SriWebpackPlugin({ integrityPolicy: { headersFile: '../_headers' } })).toThrow(/headers file/i);
   });

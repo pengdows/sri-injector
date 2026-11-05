@@ -1,12 +1,31 @@
 const path = require('path')
 const { resolveOptions } = require('../lib/options')
 const { processPages } = require('../lib/pipeline')
-const { classify, formatFatal, formatDiagnostic, noHtmlDiagnostic } = require('../lib/diagnostics')
+const { classify, formatFatal, formatDiagnostic, noHtmlDiagnostic, error, warning, CODES } = require('../lib/diagnostics')
 const { normalizeBase, outputPathFor } = require('../lib/url')
 const { sourceToString } = require('../lib/source')
 const { createExternalResolver } = require('../external')
 
 const PLUGIN_NAME = 'sri-injector'
+
+/**
+ * webpack's chunk loader creates the <script> for a lazy chunk at runtime, with no integrity, so an
+ * Integrity-Policy header would make browsers block every one of them. Reports each such JS file:
+ * an error when the policy is enforced, a warning when it is report-only (nothing is blocked).
+ */
+function lazyChunkDiagnostics(compilation, { reportOnly }) {
+    const make = reportOnly ? warning : error
+    const files = []
+    for (const chunk of compilation.chunks) {
+        if (chunk.canBeInitial()) continue
+        for (const file of chunk.files) if (/\.[cm]?js$/.test(file)) files.push(file)
+    }
+    return files.map(file => make(
+        CODES.UNPROTECTED_CHUNK,
+        `Chunk "${file}" is loaded at runtime without integrity and would be blocked by the Integrity-Policy header. webpack's chunk loader cannot carry integrity: use webpack-subresource-integrity for lazy chunks, or Integrity-Policy-Report-Only while you evaluate.`,
+        { file }
+    ))
+}
 
 /**
  * webpack plugin: injects SRI into every .html asset in the compilation (e.g. from
@@ -62,6 +81,7 @@ class SriWebpackPlugin {
                     const result = await processPages(pages, config, {
                         base,
                         resolveExternal,
+                        extraDiagnostics: config.policy ? lazyChunkDiagnostics(compilation, config.policy) : [],
                         headersFile: headersFile && {
                             read: async () => {
                                 const existing = compilation.getAsset(headersFile)

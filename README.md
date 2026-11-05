@@ -12,7 +12,7 @@ Injects [Subresource Integrity](https://developer.mozilla.org/en-US/docs/Web/Sec
 
 Requires Node.js 18+ when fetching third-party resources (`--external` uses the global `fetch`).
 
-Injects Subresource Integrity (`integrity` + `crossorigin`) into local `<script>`, `<link rel=stylesheet>`, `<link rel=modulepreload>` and `<link rel=preload>` tags (all `as` destinations). `rel` is matched as case-insensitive tokens, so `rel="alternate stylesheet"` counts.
+Injects Subresource Integrity (`integrity` + `crossorigin`) into local `<script>`, `<link rel=stylesheet>`, `<link rel=modulepreload>` and `<link rel=preload as=script|style>` tags. Other preloads (`font`, `image`, `fetch`, …) are left alone: their consumers carry no integrity, so a hash would only make the browser download the file twice. A relative URL is resolved against the page's first `<base href>`, as a browser does. The CLI reads any single-byte or UTF-8 page and writes every untouched byte back as it was; UTF-16 pages are reported as errors and left unchanged. `rel` is matched as case-insensitive tokens, so `rel="alternate stylesheet"` counts.
 
 Existing `integrity` attributes are **verified** against the actual bytes and kept if every token matches (whatever the algorithm). A stale, malformed or unsupported value is replaced and reported as a warning, since it means either the asset changed after the hash was written or something rewrote it. Running the tool twice is a no-op the second time.
 
@@ -137,6 +137,27 @@ It hashes every `.html` asset in the compilation after `html-webpack-plugin` has
 
 Options: `enabled`, `algorithm`, `crossorigin`, `strict`, `base` (defaults to `output.publicPath` when that is a string other than `'auto'`; relative and full-URL public paths work), `external`, `externalTimeout` and `integrityPolicy` (with `headersFile` it emits a `_headers` asset). There is no `importMap` option: see Limitations.
 
+**With `integrityPolicy`, lazy chunks are an error.** webpack's chunk loader creates the `<script>` for a lazy chunk at runtime, with no integrity, so an enforcing `Integrity-Policy` would make browsers block every one of them. The plugin therefore fails the build, naming each lazy JS chunk, and does not write the `_headers` file. In `report-only` mode it only warns. Use `webpack-subresource-integrity` for lazy chunks, or drop the policy. Rspack and Rsbuild behave the same.
+
+## Other bundlers and frameworks
+
+Tested with real builds (see `__tests__/*.real.test.js`):
+
+| Tool | Use | Notes |
+|---|---|---|
+| **Rolldown** | `sri-injector/rollup` | Same plugin API as Rollup; the import map for code-split chunks works too. (Vite 8 runs on Rolldown, so `sri-injector/vite` covers it.) |
+| **`@web/rollup-plugin-html`** | `sri-injector/rollup` | HTML-as-entry plugin from Modern Web. Hashes its scripts, stylesheets and lazy chunks. |
+| **Rspack / Rsbuild** | `sri-injector/webpack` | With `html-rspack-plugin` (Rspack) or Rsbuild's built-in HTML (`tools: { rspack: (c, { appendPlugins }) => appendPlugins(new Sri()) }`). Like webpack, no import map: the runtime loads lazy chunks, which an import map does not govern. Rsbuild was checked by hand; Rspack has an automated test. |
+
+Frameworks that render their HTML after the bundler has finished (Astro, SvelteKit prerender, Nuxt generate, Eleventy, VitePress, Docusaurus) have nothing for a bundler plugin to hook into. Run the CLI on their output directory as a post-build step:
+
+    astro build && npx sri-injector dist --strict
+    vitepress build docs && npx sri-injector docs/.vitepress/dist --strict
+
+Checked against real VitePress and Astro builds: the CLI hashed VitePress's scripts, stylesheets, fonts and `modulepreload` links. Astro inlines small scripts into the HTML by default, so only scripts it emits as files (large or shared ones, or all of them with `vite.build.assetsInlineLimit: 0`) get `integrity`; inline scripts have nothing to hash.
+
+Pass `--base` if the site is deployed under a sub-path or CDN. Server-rendered HTML is not covered, since there is no file to rewrite.
+
 ## Examples
 
 `examples/` contains a complete input site and the exact output, with a line-by-line explanation of what happened and why, plus a Rollup bundle showing the import map for code-split chunks. They are also golden-file tests. See `examples/README.md`.
@@ -151,7 +172,7 @@ The pieces every adapter is built from are exported too: `processPages(pages, co
 
 ## Limitations
 
-- Browsers currently enforce `integrity` on `<link rel=preload>` only for `as=script` and `as=style`; on other destinations (`font`, `image`, `fetch`, …) the attribute is accepted but not checked. A preload is also only *reused* if the consuming request matches it: for `as=fetch` your `fetch()` call must pass the same `integrity` and `mode: 'cors'`; for `as=image` the `<img>` must carry `crossorigin`. Otherwise the browser fetches the resource twice.
+- Only `<link rel=preload>` with `as=script` or `as=style` gets `integrity`: browsers enforce it only there, and a preload is reused only if the consuming request carries the same value, which a CSS `@font-face` or an `<img>` cannot. Other preloads are left as written.
 
 - Lazy chunks loaded by dynamic `import()` are covered by the Rollup/Vite plugin's import map (above), not by the CLI, which has no module graph. CSS that Vite injects at runtime for lazy chunks is not covered: `<link>` elements created from JS carry no integrity, and import maps only govern module scripts.
 - The webpack plugin covers the tags in your HTML only. Webpack's classic chunk loader creates `<script>` elements at runtime, which import maps do not govern; use [webpack-subresource-integrity](https://github.com/waysact/webpack-subresource-integrity) for lazy chunks, or `output.module` + `chunkLoading: 'import'` with this tool's CLI.

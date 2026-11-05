@@ -10,7 +10,7 @@ things only a real bundler, a real network or a real browser can confirm.
     pnpm install --frozen-lockfile
     pnpm test                      # or: npx jest --verbose
 
-Expected: 8 suites, 179 tests, all green, ~5 s. No network is used: third-party fetches run
+Expected: all suites green, ~5 s. No network is used: third-party fetches run
 against an `http` server started inside the test.
 
 | file | covers |

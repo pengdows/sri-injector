@@ -72,6 +72,15 @@ describe('diagnostics', () => {
     expect(text).toMatch(/1 script\(s\) have no integrity and would be blocked by the Integrity-Policy header:\n {2}- a\.html: https:\/\/t\.example\/a\.js/);
     expect(text).toMatch(/No HTML files found in any output/);
   });
+
+  test('formatFatal names the chunks that would be blocked', () => {
+    const text = formatFatal([
+      { severity: 'error', code: CODES.UNPROTECTED_CHUNK, file: '665.abc.js', message: 'x' },
+      { severity: 'error', code: CODES.UNPROTECTED_CHUNK, file: 'about.def.js', message: 'x' },
+    ]);
+    expect(text).toMatch(/2 chunk\(s\) are loaded at runtime without integrity and would be blocked by the Integrity-Policy header:\n {2}- 665\.abc\.js\n {2}- about\.def\.js/);
+    expect(text).not.toMatch(/could not be processed/);
+  });
 });
 
 describe('processPages', () => {
@@ -126,6 +135,22 @@ describe('processPages', () => {
       expect(h.written).toHaveLength(1);
       expect(h.written[0]).toContain('Cache-Control: max-age=1');
       expect(h.written[0]).toContain('Integrity-Policy: blocked-destinations=(script), sources=(inline)');
+    });
+
+    test('diagnostics the host adds are reported, and an error among them keeps the headers file from being written', async () => {
+      const h = host(null);
+      const chunk = { severity: 'error', code: CODES.UNPROTECTED_CHUNK, file: '1.js', message: 'lazy' };
+      const r = await processPages([page('i.html', '<script src="/a.js"></script>', { '/a.js': 'x' })], policyConfig(), { headersFile: h.headersFile, extraDiagnostics: [chunk] });
+      expect(r.diagnostics).toEqual([chunk]);
+      expect(h.written).toEqual([]);
+    });
+
+    test('a warning from the host does not keep the headers file from being written', async () => {
+      const h = host(null);
+      const chunk = { severity: 'warning', code: CODES.UNPROTECTED_CHUNK, file: '1.js', message: 'lazy' };
+      const r = await processPages([page('i.html', '<script src="/a.js"></script>', { '/a.js': 'x' })], policyConfig(), { headersFile: h.headersFile, extraDiagnostics: [chunk] });
+      expect(r.diagnostics).toEqual([chunk]);
+      expect(h.written).toHaveLength(1);
     });
 
     test('an absent headers file starts from nothing', async () => {

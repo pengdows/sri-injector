@@ -44,10 +44,6 @@ describe('injectSri: rel/as token matching', () => {
     ['extra/odd whitespace in rel', '<link rel="  stylesheet\t\nalternate " href="a.css">'],
     ['preload with mixed-case rel and as', '<link rel="Preload" as="Script" href="a.js">'],
     ['preload style with extra token',     '<link rel="preload prefetch" as="style" href="a.css">'],
-    ['preload of a font',                  '<link rel="preload" as="font" type="font/woff2" href="a.woff2">'],
-    ['preload of an image',                '<link rel="preload" as="image" href="a.png">'],
-    ['preload of a fetch target',          '<link rel="preload" as="fetch" href="data.json">'],
-    ['preload with no as',                 '<link rel="preload" href="a.js">'],
     ['modulepreload with extra token',     '<link rel="modulepreload prefetch" href="a.js">'],
     ['capitalised modulepreload',          '<link rel="ModulePreload" href="a.js">'],
   ])('hashes %s', async (_name, tag) => {
@@ -63,11 +59,26 @@ describe('injectSri: rel/as token matching', () => {
     ['rel containing stylesheet as a substring', '<link rel="stylesheets" href="a.css">'],
     ['rel containing preload as a substring',    '<link rel="preloader" href="a.js">'],
     ['alternate only',           '<link rel="alternate" href="a.css">'],
+    // Browsers enforce integrity on preloads only for script and style, and the consumers of other
+    // destinations (CSS @font-face, <img>, fetch()) carry none, so a hash would only stop the preload
+    // from being reused.
+    ['preload of a font',        '<link rel="preload" as="font" type="font/woff2" crossorigin href="a.woff2">'],
+    ['preload of an image',      '<link rel="preload" as="image" href="a.png">'],
+    ['preload of a fetch target', '<link rel="preload" as="fetch" href="data.json">'],
+    ['preload with no as',       '<link rel="preload" href="a.js">'],
     ['no rel',                   '<link href="a.css">'],
   ])('does not touch %s', async (_name, tag) => {
     const { html, modified } = await inject(tag);
     expect(modified).toBe(false);
     expect(html).not.toContain('integrity=');
+  });
+
+  test('a font preload with an existing integrity value is left exactly as written', async () => {
+    const tag = '<link rel="preload" as="font" href="a.woff2" integrity="sha256-STALE">';
+    const { html, modified, warnings } = await inject(tag);
+    expect(modified).toBe(false);
+    expect(html).toContain(tag);
+    expect(warnings).toEqual([]);
   });
 
   test('a link matching more than one rule is resolved only once', async () => {
@@ -287,7 +298,7 @@ describe('injectSri: import map integrity for module graphs', () => {
     await injectSri(
       '<html><head><link rel="modulepreload" href="/assets/dep.js"><link rel="stylesheet" href="/a.css"><script type="module" src="/assets/entry.js"></script><script src="/legacy.js"></script><script src="https://other.example.net/x.js"></script></head><body></body></html>',
       resolve, { algorithm: 'sha256', importMapIntegrity: (urls) => { received = urls; return null; } });
-    expect(received).toEqual(['/assets/entry.js', '/legacy.js', '/assets/dep.js']);
+    expect(received).toEqual(['/assets/dep.js', '/assets/entry.js', '/legacy.js']); // document order
   });
 
   test('adds an import map with the returned entries before the first module script', async () => {
@@ -460,5 +471,72 @@ describe('crossorigin option', () => {
   test('validateCrossorigin returns supported values unchanged', () => {
     expect(validateCrossorigin('anonymous')).toBe('anonymous');
     expect(validateCrossorigin(undefined)).toBe('anonymous');
+  });
+});
+
+describe('<base href>', () => {
+  // Browsers resolve relative URLs against the first <base href>, so that is the file that gets fetched
+  // (and must be the one that is hashed).
+  const seen = async (html, options = {}) => {
+    const urls = [];
+    const r = await injectSri(html, (url) => { urls.push(url); return Buffer.from('x'); }, { algorithm: 'sha256', ...options });
+    return { urls, ...r };
+  };
+
+  test('a relative URL resolves against a root-relative base', async () => {
+    const { urls } = await seen('<html><head><base href="/sub/"><script src="app.js"></script></head></html>');
+    expect(urls).toEqual(['/sub/app.js']);
+  });
+
+  test('a relative URL resolves against a relative base, from the HTML file\'s directory', async () => {
+    const { urls } = await seen('<html><head><base href="sub/"><script src="app.js"></script></head></html>');
+    expect(urls).toEqual(['sub/app.js']);
+  });
+
+  test('only the directory part of the base counts', async () => {
+    const { urls } = await seen('<html><head><base href="/sub/index.html"><script src="../app.js"></script></head></html>');
+    expect(urls).toEqual(['/app.js']);
+  });
+
+  test('query string and fragment on the tag survive resolution', async () => {
+    const { urls } = await seen('<html><head><base href="/sub/"><script src="app.js?v=2#x"></script></head></html>');
+    expect(urls).toEqual(['/sub/app.js?v=2#x']);
+  });
+
+  test('root-relative and absolute URLs ignore the base', async () => {
+    const { urls } = await seen('<html><head><base href="/sub/"><script src="/app.js"></script><script src="https://cdn.example.net/x.js"></script></head></html>');
+    expect(urls).toEqual(['/app.js']);
+  });
+
+  test('an absolute base that matches options.base makes relative URLs local', async () => {
+    const { urls, html } = await seen(
+      '<html><head><base href="https://cdn.example.com/app/"><script src="a.js"></script></head></html>',
+      { base: 'https://cdn.example.com/' }
+    );
+    expect(urls).toEqual(['https://cdn.example.com/app/a.js']);
+    expect(html).toContain('integrity="sha256-');
+  });
+
+  test('an absolute base on another host makes relative URLs external, so they are left alone', async () => {
+    const { urls, modified } = await seen('<html><head><base href="https://other.example.net/"><script src="a.js"></script></head></html>');
+    expect(urls).toEqual([]);
+    expect(modified).toBe(false);
+  });
+
+  test('only the first <base> with an href counts', async () => {
+    const { urls } = await seen('<html><head><base target="_blank"><base href="/one/"><base href="/two/"><script src="a.js"></script></head></html>');
+    expect(urls).toEqual(['/one/a.js']);
+  });
+
+  test('the import-map root list uses the resolved URLs', async () => {
+    let roots;
+    await injectSri('<html><head><base href="/sub/"><script type="module" src="a.js"></script></head></html>',
+      () => Buffer.from('x'), { algorithm: 'sha256', importMapIntegrity: (urls) => { roots = urls; return null; } });
+    expect(roots).toEqual(['/sub/a.js']);
+  });
+
+  test('without a <base>, nothing changes', async () => {
+    const { urls } = await seen('<html><head><script src="a.js"></script></head></html>');
+    expect(urls).toEqual(['a.js']);
   });
 });

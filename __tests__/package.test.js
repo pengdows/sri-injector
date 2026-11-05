@@ -43,10 +43,48 @@ describe('manifest', () => {
     }
   });
 
+  test('every runtime dependency supports the oldest Node version we promise', () => {
+    const semver = require('semver');
+    const oldest = semver.minVersion(pkg.engines.node);
+    const tooNew = Object.keys(pkg.dependencies).filter((name) => {
+      const range = require(`../node_modules/${name}/package.json`).engines;
+      return range && range.node && !semver.satisfies(oldest, range.node);
+    });
+    expect(tooNew).toEqual([]);
+  });
+
+  test('keeps the runtime dependencies to the two it needs (HTML parser with source positions, CLI parsing)', () => {
+    expect(Object.keys(pkg.dependencies).sort()).toEqual(['commander', 'parse5']);
+  });
+
+  test('the packed library and CLI never require a package that is not a runtime dependency', () => {
+    const { builtinModules } = require('module');
+    const declared = new Set(Object.keys(pkg.dependencies));
+    const shipped = ['index.js', 'core.js', 'external.js', 'SubresourceIntegrityInjector.js', 'HashAlgo.js', 'bin/cli.js']
+      .concat(fs.readdirSync(path.join(ROOT, 'lib')).map(f => `lib/${f}`), fs.readdirSync(path.join(ROOT, 'adapters')).map(f => `adapters/${f}`));
+    const missing = [];
+    for (const file of shipped) {
+      const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
+      for (const m of src.matchAll(/require\(['"]([^'".][^'"]*)['"]\)/g)) {
+        const name = m[1].startsWith('@') ? m[1].split('/').slice(0, 2).join('/') : m[1].split('/')[0];
+        const optionalPeer = pkg.peerDependenciesMeta && pkg.peerDependenciesMeta[name];
+        if (!declared.has(name) && !optionalPeer && !builtinModules.includes(name.replace(/^node:/, ''))) missing.push(`${file}: ${m[1]}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
   test('test-only tools stay in devDependencies', () => {
     for (const name of ['jest', 'html-webpack-plugin', '@rollup/plugin-html', 'c8']) {
       expect(pkg.dependencies || {}).not.toHaveProperty(name);
     }
+  });
+
+  test('every entry point declares its types', () => {
+    for (const key of ['.', './rollup', './vite', './webpack', './core']) {
+      expect(pkg.exports[key].types).toMatch(/\.d\.ts$/);
+    }
+    expect(pkg.types).toBe('./index.d.ts');
   });
 
   test('exports an entry for every adapter', () => {
@@ -59,13 +97,16 @@ describe('manifest', () => {
 describe('published files', () => {
   test('includes everything the entry points need', () => {
     for (const f of ['package.json', 'README.md', 'index.js', 'core.js', 'external.js', 'HashAlgo.js',
-      'SubresourceIntegrityInjector.js', 'bin/cli.js', 'adapters/rollup.js', 'adapters/webpack.js', 'lib/url.js', 'lib/html.js', 'lib/source.js']) {
+      'SubresourceIntegrityInjector.js', 'bin/cli.js', 'adapters/rollup.js', 'adapters/vite.js', 'adapters/webpack.js', 'lib/url.js', 'lib/html.js', 'lib/html-document.js', 'lib/source.js',
+      'index.d.ts', 'core.d.ts', 'types.d.ts', 'adapters/rollup.d.ts', 'adapters/vite.d.ts', 'adapters/webpack.d.ts']) {
       expect(packed.files).toContain(f);
     }
   });
 
   test('every exports target and the bin file is in the tarball', () => {
-    const targets = [...Object.values(pkg.exports), ...Object.values(pkg.bin)].map(t => t.replace(/^\.\//, ''));
+    // exports entries are plain paths or { types, default } conditions
+    const flat = Object.values(pkg.exports).flatMap(v => (typeof v === 'string' ? [v] : Object.values(v)));
+    const targets = [...flat, ...Object.values(pkg.bin), pkg.types].map(t => t.replace(/^\.\//, ''));
     for (const t of targets) expect(packed.files).toContain(t);
   });
 

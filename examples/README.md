@@ -6,7 +6,9 @@ diff shows precisely what changed.
 
 ## `site/` — CLI / filesystem injector
 
-    npx sri-injector examples/site/input   # (run on a copy; it rewrites in place)
+    cp -r examples/site/input /tmp/site-copy
+    node bin/cli.js /tmp/site-copy          # (or `npx sri-injector /tmp/site-copy` once installed)
+    diff examples/site/input/index.html /tmp/site-copy/index.html
 
 `input/index.html` and `input/pages/about.html` → `expected/index.html`, `expected/pages/about.html`
 (`sha384`). What each line demonstrates:
@@ -15,7 +17,8 @@ diff shows precisely what changed.
 |---|---|---|
 | `<link rel="alternate stylesheet" href="/assets/site.css">` | hashed | `rel` is matched as tokens; root-relative resolves against the output dir |
 | `<link rel="Stylesheet" href="assets/fonts.css?v=3#frag">` | hashed | case-insensitive `rel`; query/fragment ignored when locating the file |
-| `<link rel="preload" as="font" href="/assets/x.woff2">` | hashed | all `preload` destinations |
+| `<link rel="preload" as="script\|style" href="…">` | hashed | integrity is enforced there and the consumer can carry the same value |
+| `<link rel="preload" as="font" href="/assets/x.woff2">` | untouched | fonts, images and `fetch` targets: no enforcement, and the consumer carries no hash, so one would only defeat the preload |
 | `<link rel="modulepreload" href="/assets/lazy.js">` | hashed | |
 | `<script src="/assets/vendor.js" integrity="sha256-…">` (correct) | **kept as is** | existing value verified against the file; a valid hash is not rewritten even though the run uses sha384 |
 | `<script src="/assets/app.js" integrity="sha384-STALE-VALUE" crossorigin="use-credentials">` | hash replaced, `crossorigin` kept | stale value → replaced and reported in `result.json` as a warning |
@@ -26,8 +29,10 @@ diff shows precisely what changed.
 
 `expected/result.json` is the injector's return value: `{ files: 2, errors: [], warnings: [one stale hash] }`.
 
-Note the serializer normalises markup (`<!DOCTYPE html>`, `defer=""`, head/html tags joined on one
-line). The tool re-serialises the document; it does not patch text in place.
+The rest of each page is byte-for-byte what you wrote: only the tags above change (compare with
+`diff examples/site/input/index.html examples/site/expected/index.html`). The tool patches those
+tags in place and never re-serialises the document, so doctype, case, quoting, boolean attributes
+(`async`, not `async=""`) and blank lines survive.
 
 ## `rollup-bundle/` — Rollup / Vite plugin
 

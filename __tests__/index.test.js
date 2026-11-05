@@ -30,10 +30,10 @@ test('insertSRIInHTML should add SRI attributes to script and preserve existing 
   await s.insertSRIInHTML(TEST_DIR, 'sha256');
   
   const updatedHtmlContent = fs.readFileSync(HTML_FILE, 'utf-8');
-  // Cheerio might reorder attributes or use self-closing tags depending on settings
   expect(updatedHtmlContent).toContain('src="test.js"');
-  expect(updatedHtmlContent).toContain('async=""');
-  expect(updatedHtmlContent).toContain('defer=""');
+  // boolean attributes are preserved exactly as written, not rewritten to async=""
+  expect(updatedHtmlContent).toContain(' async defer');
+  expect(updatedHtmlContent).not.toContain('async=""');
   expect(updatedHtmlContent).toContain('integrity="sha256-');
   expect(updatedHtmlContent).toContain('crossorigin="anonymous"');
 });
@@ -317,4 +317,41 @@ test('an unreadable resource (a directory, not a file) is reported as an error, 
   } finally {
     spy.mockRestore();
   }
+});
+
+describe('character encodings', () => {
+  const page = (charset, body) => Buffer.concat([
+    Buffer.from(`<html><head><meta charset="${charset}"><script src="test.js"></script></head><body>`),
+    body,
+    Buffer.from('</body></html>'),
+  ]);
+
+  test('a page that is not UTF-8 keeps every other byte as written', async () => {
+    const body = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x20, 0xf1]); // "café ñ" in ISO-8859-1
+    fs.writeFileSync(HTML_FILE, page('iso-8859-1', body));
+    const { errors } = await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256');
+    expect(errors).toEqual([]);
+    const out = fs.readFileSync(HTML_FILE);
+    expect(out.includes(body)).toBe(true);
+    expect(out.toString('latin1')).toContain('integrity="sha256-');
+    expect(out.includes(Buffer.from([0xef, 0xbf, 0xbd]))).toBe(false); // no U+FFFD
+  });
+
+  test('UTF-8 pages (with and without a BOM) are unchanged apart from the injected attributes', async () => {
+    for (const bom of [Buffer.alloc(0), Buffer.from([0xef, 0xbb, 0xbf])]) {
+      fs.writeFileSync(HTML_FILE, Buffer.concat([bom, page('utf-8', Buffer.from('café ñ 日本'))]));
+      await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256');
+      const out = fs.readFileSync(HTML_FILE);
+      expect(out.subarray(0, bom.length).equals(bom)).toBe(true);
+      expect(out.toString('utf8')).toContain('café ñ 日本');
+    }
+  });
+
+  test('a UTF-16 page is reported as an error and left untouched', async () => {
+    const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('<html><head><script src="test.js"></script></head></html>', 'utf16le')]);
+    fs.writeFileSync(HTML_FILE, utf16);
+    const { errors } = await new SubresourceIntegrityInjector().insertSRIInHTML(TEST_DIR, 'sha256');
+    expect(errors.join('\n')).toMatch(/UTF-16/);
+    expect(fs.readFileSync(HTML_FILE).equals(utf16)).toBe(true);
+  });
 });

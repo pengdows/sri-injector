@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "module": "node16",
+    "moduleResolution": "node16",
+    "target": "es2022",
+    "strict": true,
+    "esModuleInterop": true,
+    "noEmit": true,
+    "skipLibCheck": false,
+    "types": ["node"]
+  },
+  "files": ["usage.ts"]
+}

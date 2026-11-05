@@ -1,4 +1,6 @@
-<!DOCTYPE html><html lang="en"><head>
+<!doctype html>
+<html lang="en">
+<head>
   <meta charset="utf-8">
   <title>Example</title>
 
@@ -7,7 +9,7 @@
   <link rel="Stylesheet" href="assets/fonts.css?v=3#frag" integrity="sha384-mO4US5UafJzwhQNkY8BtNOCUQgEQXcBxQsQg0/tDCqs0SKkoozEAkNpxavOGDGs/" crossorigin="anonymous">
 
   <!-- preload / modulepreload -->
-  <link rel="preload" as="font" type="font/woff2" href="/assets/x.woff2" integrity="sha384-6mn2Sqt6fE43yd/eM2tXVy8EjP6ljoUSIPEZ0Gm8T+HOE10eXYiMMCh1lWrI2JTg" crossorigin="anonymous">
+  <link rel="preload" as="font" type="font/woff2" href="/assets/x.woff2">
   <link rel="modulepreload" href="/assets/lazy.js" integrity="sha384-1eSxnT59+RS/rZAPPo4I3MVmKT13Lk/5VGNrTngfc+m4NbwIHvdq/4vBIDTtsl7w" crossorigin="anonymous">
 
   <!-- existing integrity: valid (other algorithm) is kept, stale is replaced -->
@@ -18,13 +20,12 @@
   <script src="/assets/..odd.js" integrity="sha384-LDtXFpF+8fhsV5UP1++ffv6PRJVXiPnCZLN7GASL5hbVSBIySHf+AxfOfIgoAI5v" crossorigin="anonymous"></script>
 
   <!-- untouched: external, inline, icon, prefetch -->
-  <script src="https://cdn.example.net/analytics.js" defer=""></script>
+  <script src="https://cdn.example.net/analytics.js" defer></script>
   <script>window.inline = true;</script>
   <link rel="icon" href="/favicon.ico">
   <link rel="prefetch" href="/assets/lazy.js">
 </head>
 <body>
-  <script src="legacy.js" async="" integrity="sha384-1C5NY5XwSLAGtYVyuzVhY3A6054H+Tgll2GpwwTEPIZ8IFKLxB30XElhvXgpM2de" crossorigin="anonymous"></script>
-
-
-</body></html>
+  <script src="legacy.js" async integrity="sha384-1C5NY5XwSLAGtYVyuzVhY3A6054H+Tgll2GpwwTEPIZ8IFKLxB30XElhvXgpM2de" crossorigin="anonymous"></script>
+</body>
+</html>
