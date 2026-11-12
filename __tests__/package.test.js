@@ -24,9 +24,9 @@ beforeAll(() => {
 afterAll(() => fs.rmSync(packDir, { recursive: true, force: true }));
 
 describe('manifest', () => {
-  test('declares the supported Node version (global fetch is needed for --external)', () => {
+  test('targets the oldest Node LTS line still in support (22; >=22.13 can require() ES modules with no warning)', () => {
     expect(pkg.engines).toBeDefined();
-    expect(pkg.engines.node).toMatch(/^>=\s*18/);
+    expect(pkg.engines.node).toBe('>=22.13.0');
   });
 
   test('has a description, license and repository', () => {
@@ -43,6 +43,15 @@ describe('manifest', () => {
     expect(pkg.author).toBe('Pengdows LLC');
     expect(text).toContain('Permission is hereby granted, free of charge');
     expect(packed.files.has('LICENSE')).toBe(true);
+  });
+
+  test('CI runs the suite on the engines floor and on every supported LTS line', () => {
+    const ci = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
+    const floor = pkg.engines.node.replace(/^>=\s*/, '');
+    for (const version of [floor, '22', '24', '26']) expect(ci).toMatch(new RegExp(`node:.*['"]${version.replace(/\./g, '\\.')}['"]`));
+    expect(ci).toContain('pnpm install --frozen-lockfile');
+    expect(ci).toContain('pnpm coverage');
+    expect(ci).toContain('pnpm test:browser');
   });
 
   test('bundlers are optional peer dependencies, not runtime dependencies', () => {

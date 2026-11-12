@@ -10,7 +10,7 @@ Injects [Subresource Integrity](https://developer.mozilla.org/en-US/docs/Web/Sec
     # or
     pnpm add sri-injector
 
-Requires Node.js 18+ when fetching third-party resources (`--external` uses the global `fetch`).
+Requires Node.js 22.13 or later (the oldest LTS line still in support).
 
 Injects Subresource Integrity (`integrity` + `crossorigin`) into local `<script>`, `<link rel=stylesheet>`, `<link rel=modulepreload>` and `<link rel=preload as=script|style>` tags. Other preloads (`font`, `image`, `fetch`, …) are left alone: their consumers carry no integrity, so a hash would only make the browser download the file twice. A relative URL is resolved against the page's first `<base href>`, as a browser does. The CLI reads any single-byte or UTF-8 page and writes every untouched byte back as it was; UTF-16 pages are reported as errors and left unchanged. `rel` is matched as case-insensitive tokens, so `rel="alternate stylesheet"` counts.
 
