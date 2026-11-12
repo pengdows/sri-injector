@@ -2,7 +2,7 @@
 
 Injects [Subresource Integrity](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity) (`integrity` + `crossorigin`) attributes into `<script>` and `<link>` tags across a build tool's HTML output.
 
-**Why this matters:** SRI is what stops a compromised script from silently running in your users' browsers. If a CDN you depend on (or a self-hosted bundle on a compromised host) is tampered with *after* you ship a page that references it, a browser checking that reference against a pinned hash refuses to load the altered file instead of executing it. That protection only exists for tags that actually carry an `integrity` attribute, so the goal here is to inject one everywhere the SRI spec allows it.
+**Why this matters:** SRI is what stops a compromised script from silently running in your users' browsers. If a CDN you depend on (or a self-hosted bundle on a compromised host) is tampered with *after* you ship a page that references it, a browser checking that reference against a pinned hash refuses to load the altered file instead of executing it. That protection only exists for tags that actually carry an `integrity` attribute, so this tool puts one on every script and stylesheet tag in your built HTML where a build-time tool can. Some code never appears in the HTML at all (lazy webpack chunks, scripts your own JS inserts, workers); see [Limitations](#limitations) for what is and is not covered.
 
 ## Install
 
@@ -10,11 +10,40 @@ Injects [Subresource Integrity](https://developer.mozilla.org/en-US/docs/Web/Sec
     # or
     pnpm add @pengdows/sri-injector
 
-Requires Node.js 22.13 or later (the oldest LTS line still in support).
+Requires Node.js 22.13 or later (the oldest LTS line still in support). The package is CommonJS and works from `import` too.
 
-Injects Subresource Integrity (`integrity` + `crossorigin`) into local `<script>`, `<link rel=stylesheet>`, `<link rel=modulepreload>` and `<link rel=preload as=script|style>` tags. Other preloads (`font`, `image`, `fetch`, …) are left alone: their consumers carry no integrity, so a hash would only make the browser download the file twice. A relative URL is resolved against the page's first `<base href>`, as a browser does. The CLI reads any single-byte or UTF-8 page and writes every untouched byte back as it was; UTF-16 pages are reported as errors and left unchanged. `rel` is matched as case-insensitive tokens, so `rel="alternate stylesheet"` counts.
+## Know before you adopt
 
-Existing `integrity` attributes are **verified** against the actual bytes and kept if every token matches (whatever the algorithm). A stale, malformed or unsupported value is replaced and reported as a warning, since it means either the asset changed after the hash was written or something rewrote it. Running the tool twice is a no-op the second time.
+- **webpack and Rspack lazy chunks are not covered**, and with an enforcing `Integrity-Policy` the build fails because of them. The Rollup/Vite/Rolldown plugin does cover them, through an import map.
+- **Safari 26 has an open bug** ([WebKit 326340](https://bugs.webkit.org/show_bug.cgi?id=326340)) that blocks modules imported through an import map when `Integrity-Policy` is enforced. If you enable both, test in Safari first and roll out with `report-only`.
+- **`--external` pins whatever the third party serves at build time.** Nothing records the expected hash between builds, so a changed CDN file is pinned silently on the next build unless you notice the diff.
+- Only the tags in your HTML are covered. Scripts inserted at runtime, workers and service workers carry no integrity.
+
+## What it does
+
+Injects `integrity` and `crossorigin` into local `<script src>`, `<link rel=stylesheet>`, `<link rel=modulepreload>` and `<link rel=preload as=script|style>` tags.
+
+- `rel` is matched as case-insensitive tokens, so `rel="alternate stylesheet"` counts.
+- Other preloads (`font`, `image`, `fetch`, ...) are left alone: their consumers carry no integrity, so a hash would only make the browser download the file twice.
+- A relative URL is resolved against the page's first `<base href>`, as a browser does.
+- Existing `integrity` attributes are **verified** against the actual bytes and kept if every token matches (whatever the algorithm). A stale, malformed or unsupported value is replaced and reported as a warning, since it means either the asset changed after the hash was written or something rewrote it. Running the tool twice is a no-op the second time.
+- Everything else in the page is written back exactly as it was. The CLI reads UTF-8 and single-byte pages byte for byte; UTF-16 pages are reported as errors and left unchanged.
+
+## Tested with
+
+Automated, on every push (Node 22.13, 22, 24 and 26 on Linux), against the latest releases at the time of writing:
+
+| Area | Versions |
+|---|---|
+| Rollup | 4.68, with `@rollup/plugin-html` and `@web/rollup-plugin-html` |
+| Vite | 8.3, including `@vitejs/plugin-legacy` and a real Chromium (Playwright) |
+| webpack | 5.112, with `html-webpack-plugin` 5.6 |
+| Rolldown | 1.3 (standalone) |
+| Rspack | 2.3, with `html-rspack-plugin` |
+
+Checked by hand once, not in CI: Rsbuild, and the CLI on VitePress and Astro builds.
+
+**Not tested:** Firefox and Safari, Windows and macOS (only mocked `win32` path tests), and any Rollup before 4, Vite before 8 or older webpack 5. The peer ranges (`rollup >=3`, `vite >=4`, `webpack ^5`) are wider than what is tested.
 
 ## CLI (post-build)
 
@@ -44,7 +73,7 @@ By default, resources on other hosts (`https://cdn.jsdelivr.net/...`, `//fonts.g
 
 ## Enforcing it: the `Integrity-Policy` header
 
-SRI only protects the tags that carry it. The [`Integrity-Policy`](https://w3c.github.io/webappsec-subresource-integrity/#integrity-policy) response header closes the gap: browsers that support it (Chromium 138+) **block any script request without integrity metadata**, so a script injected without a hash can no longer load. It is an HTTP header, not something that can go in the HTML, so this tool prepares it rather than injecting it:
+SRI only protects the tags that carry it. The [`Integrity-Policy`](https://w3c.github.io/webappsec-subresource-integrity/#integrity-policy) response header closes the gap: browsers that support it (Chrome 138+, Firefox 145+) **block any script request without integrity metadata**, so a script injected without a hash can no longer load. It is an HTTP header, not something that can go in the HTML, so this tool prepares it rather than injecting it:
 
     npx @pengdows/sri-injector dist --integrity-policy                 # CLI
     sri({ integrityPolicy: true })                           # Rollup / Vite
@@ -113,7 +142,7 @@ Lazy chunks never appear in the HTML, so no tag can carry their hash. The plugin
 
 Browsers apply those hashes to any module fetch for that URL that has no integrity of its own — `import()`, static imports between chunks, and `modulepreload`. Keys follow `base` (CDN URLs included). The map is placed before the first module script, an existing import map is merged into rather than duplicated, and chunks the HTML already references are left to their tags. Disable with `importMap: false`.
 
-Import-map `integrity` is supported in Chromium 127+ and recent Safari/Firefox; older browsers ignore the unknown key (no protection, no breakage). [es-module-shims](https://github.com/guybedford/es-module-shims) polyfills it if you need coverage there.
+Import-map `integrity` is supported in Chrome/Edge 127, Safari 18 and Firefox 138; older browsers ignore the unknown key (no protection, no breakage). Safari 26 blocks modules imported through an import map when `Integrity-Policy` is enforced ([WebKit 326340](https://bugs.webkit.org/show_bug.cgi?id=326340)), so test there before enforcing both. [es-module-shims](https://github.com/guybedford/es-module-shims) polyfills it if you need coverage there.
 
 Use `strict: true` in CI. Option names are checked: an unknown key such as `strcit` is rejected at configuration time, so a typo cannot silently turn a safeguard off.
 
@@ -137,7 +166,7 @@ It hashes every `.html` asset in the compilation after `html-webpack-plugin` has
 
 Options: `enabled`, `algorithm`, `crossorigin`, `strict`, `base` (defaults to `output.publicPath` when that is a string other than `'auto'`; relative and full-URL public paths work), `external`, `externalTimeout` and `integrityPolicy` (with `headersFile` it emits a `_headers` asset). There is no `importMap` option: see Limitations.
 
-**With `integrityPolicy`, lazy chunks are an error.** webpack's chunk loader creates the `<script>` for a lazy chunk at runtime, with no integrity, so an enforcing `Integrity-Policy` would make browsers block every one of them. The plugin therefore fails the build, naming each lazy JS chunk, and does not write the `_headers` file. In `report-only` mode it only warns. Use `webpack-subresource-integrity` for lazy chunks, or drop the policy. Rspack and Rsbuild behave the same.
+**With `integrityPolicy`, lazy chunks are an error.** webpack's chunk loader creates the `<script>` for a lazy chunk at runtime, with no integrity, so an enforcing `Integrity-Policy` would make browsers block every one of them. The plugin therefore fails the build, naming each lazy JS chunk, and does not write the `_headers` file. In `report-only` mode it only warns. Use `webpack-subresource-integrity` for lazy chunks, or drop the policy. Rspack and Rsbuild behave the same (Rspack is tested; Rsbuild is not).
 
 ## Other bundlers and frameworks
 
@@ -172,17 +201,50 @@ The pieces every adapter is built from are exported too: `processPages(pages, co
 
 ## Limitations
 
-- Only `<link rel=preload>` with `as=script` or `as=style` gets `integrity`: browsers enforce it only there, and a preload is reused only if the consuming request carries the same value, which a CSS `@font-face` or an `<img>` cannot. Other preloads are left as written.
+**What no build-time tool can cover**
+- Scripts and styles your own JS or a third-party tag manager inserts at runtime, `Worker`/`SharedWorker`/service worker scripts and `importScripts()`. Under an enforcing `Integrity-Policy` these are blocked, which is what `report-only` mode is for.
+- CSS that Vite injects at runtime for lazy chunks: `<link>` elements created from JS carry no integrity, and import maps only govern module scripts.
+- Inline scripts and styles (SRI does not apply to them).
+- Server-rendered HTML: there is no file to rewrite.
 
-- Lazy chunks loaded by dynamic `import()` are covered by the Rollup/Vite plugin's import map (above), not by the CLI, which has no module graph. CSS that Vite injects at runtime for lazy chunks is not covered: `<link>` elements created from JS carry no integrity, and import maps only govern module scripts.
-- The webpack plugin covers the tags in your HTML only. Webpack's classic chunk loader creates `<script>` elements at runtime, which import maps do not govern; use [webpack-subresource-integrity](https://github.com/waysact/webpack-subresource-integrity) for lazy chunks, or `output.module` + `chunkLoading: 'import'` with this tool's CLI.
-- Inline scripts/styles are not covered (SRI does not apply to them).
-- Anything that changes files after this runs (compression that alters content, banners) invalidates hashes.
-- Remote hosts need CORS headers for `crossorigin` resources.
+**Browser support**
+- The `integrity` attribute itself works in Chrome 45, Edge 17, Firefox 43, Safari 11 and iOS Safari 11.3 and later, about 97% of global usage ([caniuse](https://caniuse.com/subresource-integrity)). Internet Explorer ignores it, so those visitors get no protection but also no breakage.
+- To see which of *your* target browsers get no protection, ask [browserslist](https://github.com/browserslist/browserslist) (it reads caniuse's data):
+
+      npx browserslist "defaults and not fully supports subresource-integrity"
+
+  At the time of writing that prints only `op_mini all`. To target just the browsers that do support it, put `fully supports subresource-integrity` in your browserslist config. The result depends on your `caniuse-lite` version, so update it (`npx update-browserslist-db@latest`) before relying on it.
+- Import-map `integrity` and the `Integrity-Policy` header are newer and have their own, narrower support: see below.
+
+**Lazy chunks**
+- The Rollup/Vite/Rolldown plugin covers them with an import map (see above). The CLI cannot: it has no module graph.
+- The webpack and Rspack plugin cannot. Their classic chunk loader creates `<script>` elements at runtime, which import maps do not govern. With `integrityPolicy` enabled the build fails and names each lazy chunk. Use [webpack-subresource-integrity](https://github.com/waysact/webpack-subresource-integrity) for lazy chunks, or drop the policy.
+- Import-map `integrity` needs Chrome/Edge 127, Safari 18 or Firefox 138. Older browsers ignore it: no protection, no breakage.
+
+**`Integrity-Policy`**
+- Supported in Chrome 138+ and Firefox 145+ (Firefox has no Reporting API support). Safari's support is incomplete: see the open bug under "Know before you adopt".
+- The header this tool prepares blocks the `script` destination only (`blocked-destinations=(script)`), so stylesheets without integrity are not blocked by it.
+
+**Third parties (`--external`)**
+- You trust the bytes the server returns at build time, and there is no lockfile of expected hashes.
+- The host must send `Access-Control-Allow-Origin`, or the tag is left unchanged with a warning.
+- Anything that varies by request (A/B tests, geo, edge minification, CDN rewriting) will be blocked by the browser.
+
+**Files and encodings**
+- Only files ending in `.html` are processed (not `.htm` or template files).
+- Non-UTF-8 pages are edited as Latin-1 so every other byte survives, but a URL containing non-ASCII bytes will not match a file on disk by name.
+- The Rollup and webpack plugins decode HTML assets as UTF-8, as bundler output normally is.
+- Anything that changes files after this runs (compression that alters content, banners, CDN auto-minify) invalidates the hashes.
+
+**Not implemented**
+- One hash algorithm per run (no `sha384 sha512` pairs).
+- No hash manifest for server-rendered templates, and no include/exclude for pages (the only opt-out is the `skip-sri` attribute).
+- No CSP nonce or hash generation.
 
 ## Development
 
-    npm test            # unit, integration and packaging tests
-    npm run coverage    # tests with a coverage gate
+    pnpm test             # unit, integration and packaging tests
+    pnpm coverage         # tests with a coverage gate
+    pnpm test:browser     # real-Chromium tests (set CHROME_PATH if Chrome is not in a standard place)
 
-`npm run coverage` fails if coverage drops below the thresholds in `package.json` (in-process code, measured by Jest's V8 provider) and `.c8rc.json` (the CLI, which runs in child processes, so it is measured with `c8`). The packaging tests run `npm pack`, install the tarball into a clean project and run the installed CLI.
+`pnpm coverage` fails if coverage drops below the thresholds in `package.json` (in-process code, measured by Jest's V8 provider) and `.c8rc.json` (the CLI, which runs in child processes, so it is measured with `c8`). The packaging tests run `npm pack` and `npm publish --dry-run`, install the tarball into a clean project and run the installed CLI. Under `CI=true` the browser tests fail instead of skipping when there is no Chrome.
