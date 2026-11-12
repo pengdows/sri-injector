@@ -35,6 +35,16 @@ describe('manifest', () => {
     expect(pkg.repository).toBeDefined();
   });
 
+  test('is MIT licensed, and the LICENSE file says so and ships in the tarball', () => {
+    expect(pkg.license).toBe('MIT');
+    const text = fs.readFileSync(path.join(ROOT, 'LICENSE'), 'utf8');
+    expect(text).toMatch(/^MIT License\n/);
+    expect(text).toMatch(/^Copyright \(c\) \d{4} Pengdows LLC$/m);
+    expect(pkg.author).toBe('Pengdows LLC');
+    expect(text).toContain('Permission is hereby granted, free of charge');
+    expect(packed.files.has('LICENSE')).toBe(true);
+  });
+
   test('bundlers are optional peer dependencies, not runtime dependencies', () => {
     for (const name of ['webpack', 'rollup', 'vite']) {
       expect(pkg.dependencies || {}).not.toHaveProperty(name);

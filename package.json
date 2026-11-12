@@ -16,8 +16,8 @@
     "type": "git",
     "url": "git+ssh://git@github.com/pengdows/sri-injector.git"
   },
-  "license": "ISC",
-  "author": "",
+  "license": "MIT",
+  "author": "Pengdows LLC",
   "main": "index.js",
   "bin": {
     "sri-injector": "./bin/cli.js"
