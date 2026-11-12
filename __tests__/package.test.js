@@ -35,6 +35,21 @@ describe('manifest', () => {
     expect(pkg.repository).toBeDefined();
   });
 
+  test('is published as the public scoped package @pengdows/sri-injector, keeping the unscoped CLI name', () => {
+    expect(pkg.name).toBe('@pengdows/sri-injector');
+    expect(pkg.publishConfig).toEqual({ access: 'public' }); // scoped packages are private by default
+    expect(Object.keys(pkg.bin)).toEqual(['sri-injector']);
+  });
+
+  test('the docs name the scoped package everywhere: an unscoped `npx sri-injector` would run a different package', () => {
+    for (const file of ['README.md', 'TESTING.md']) {
+      const text = fs.readFileSync(path.join(ROOT, file), 'utf8');
+      expect(text).not.toMatch(/npx sri-injector/);
+      expect(text).not.toMatch(/(npm install|pnpm add) sri-injector/);
+      expect(text).not.toMatch(/(from |require\()['"]sri-injector/);
+    }
+  });
+
   test('is MIT licensed, and the LICENSE file says so and ships in the tarball', () => {
     expect(pkg.license).toBe('MIT');
     const text = fs.readFileSync(path.join(ROOT, 'LICENSE'), 'utf8');
@@ -137,8 +152,18 @@ describe('published files', () => {
   });
 });
 
+describe('publish', () => {
+  // `npm pack` accepts a manifest that `npm publish` silently repairs, e.g. dropping a bin written as
+  // "./bin/cli.js", which would publish a package with no CLI.
+  test('npm publish --dry-run changes nothing in the manifest', () => {
+    const r = run('npm', ['publish', '--dry-run'], { cwd: ROOT });
+    expect(r.stderr).not.toMatch(/auto-corrected|was invalid and removed/);
+    expect(r.status).toBe(0);
+  }, 60000);
+});
+
 describe('entry points resolve by package name', () => {
-  test.each(['sri-injector', 'sri-injector/rollup', 'sri-injector/vite', 'sri-injector/webpack', 'sri-injector/core', 'sri-injector/external'])(
+  test.each(['@pengdows/sri-injector', '@pengdows/sri-injector/rollup', '@pengdows/sri-injector/vite', '@pengdows/sri-injector/webpack', '@pengdows/sri-injector/core', '@pengdows/sri-injector/external'])(
     'require(%s)', (spec) => {
       const r = run(process.execPath, ['-e', `const m = require(${JSON.stringify(spec)}); if (!m) process.exit(2)`], { cwd: ROOT });
       expect(r.stderr).toBe('');
@@ -147,7 +172,7 @@ describe('entry points resolve by package name', () => {
 
   test('the Vite/Rollup plugin is a function when imported from ESM (vite.config.mjs style)', () => {
     const r = run(process.execPath, ['--input-type=module', '-e',
-      "import sri from 'sri-injector/vite'; import webpackSri from 'sri-injector/webpack'; process.stdout.write(typeof sri + ',' + typeof webpackSri)"], { cwd: ROOT });
+      "import sri from '@pengdows/sri-injector/vite'; import webpackSri from '@pengdows/sri-injector/webpack'; process.stdout.write(typeof sri + ',' + typeof webpackSri)"], { cwd: ROOT });
     expect(r.stdout).toBe('function,function');
   });
 
@@ -176,7 +201,7 @@ describe('installed tarball', () => {
       expect(fs.readFileSync(path.join(dist, 'index.html'), 'utf8')).toMatch(/integrity="sha384-/);
 
       const adapters = run(process.execPath, ['-e',
-        "require('sri-injector/rollup'); require('sri-injector/webpack'); require('sri-injector/vite')"], { cwd: proj });
+        "require('@pengdows/sri-injector/rollup'); require('@pengdows/sri-injector/webpack'); require('@pengdows/sri-injector/vite')"], { cwd: proj });
       expect(adapters.stderr).toBe('');
       expect(adapters.status).toBe(0);
     } finally {

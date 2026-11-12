@@ -1,4 +1,4 @@
-# sri-injector
+# @pengdows/sri-injector
 
 Injects [Subresource Integrity](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity) (`integrity` + `crossorigin`) attributes into `<script>` and `<link>` tags across a build tool's HTML output.
 
@@ -6,9 +6,9 @@ Injects [Subresource Integrity](https://developer.mozilla.org/en-US/docs/Web/Sec
 
 ## Install
 
-    npm install sri-injector
+    npm install @pengdows/sri-injector
     # or
-    pnpm add sri-injector
+    pnpm add @pengdows/sri-injector
 
 Requires Node.js 22.13 or later (the oldest LTS line still in support).
 
@@ -18,7 +18,7 @@ Existing `integrity` attributes are **verified** against the actual bytes and ke
 
 ## CLI (post-build)
 
-    npx sri-injector ./dist [--algo sha384] [--crossorigin anonymous|use-credentials] [--strict] [--base /app/ | https://cdn.example.com/] [--external] [--integrity-policy | --integrity-policy-report-only] [--headers-file _headers]
+    npx @pengdows/sri-injector ./dist [--algo sha384] [--crossorigin anonymous|use-credentials] [--strict] [--base /app/ | https://cdn.example.com/] [--external] [--integrity-policy | --integrity-policy-report-only] [--headers-file _headers]
 
 Pass `--base` when the HTML was built with a non-root Vite/Rollup `base`. With a full URL, assets under it (your own CDN) are hashed instead of being skipped as third-party externals.
 
@@ -46,7 +46,7 @@ By default, resources on other hosts (`https://cdn.jsdelivr.net/...`, `//fonts.g
 
 SRI only protects the tags that carry it. The [`Integrity-Policy`](https://w3c.github.io/webappsec-subresource-integrity/#integrity-policy) response header closes the gap: browsers that support it (Chromium 138+) **block any script request without integrity metadata**, so a script injected without a hash can no longer load. It is an HTTP header, not something that can go in the HTML, so this tool prepares it rather than injecting it:
 
-    npx sri-injector dist --integrity-policy                 # CLI
+    npx @pengdows/sri-injector dist --integrity-policy                 # CLI
     sri({ integrityPolicy: true })                           # Rollup / Vite
 
 - **Audit**: any `<script src>` still without integrity after injection (a third-party without CORS, a missing file) becomes an error, because shipping the header alongside it would break the page. The CLI also warns if output JS uses `import()`, since it cannot cover those chunks (the plugin can, via the import map).
@@ -58,10 +58,10 @@ The header only affects scripts the browser fetches; inline scripts are untouche
 
 ## Vite plugin
 
-`sri-injector/vite` is the Rollup plugin below plus what only Vite provides: it reads `base` and `publicDir` from Vite's resolved config, runs last, and sets the `Integrity-Policy` header on `vite preview`. Use `sri-injector/rollup` for plain Rollup.
+`@pengdows/sri-injector/vite` is the Rollup plugin below plus what only Vite provides: it reads `base` and `publicDir` from Vite's resolved config, runs last, and sets the `Integrity-Policy` header on `vite preview`. Use `@pengdows/sri-injector/rollup` for plain Rollup.
 
     // vite.config.js
-    import sri from 'sri-injector/vite'
+    import sri from '@pengdows/sri-injector/vite'
     export default { plugins: [sri({ strict: true })] }
 
 `base` and `publicDir` are picked up from Vite's resolved config, so files in `public/` are hashed too. This includes a full-URL `base` (`base: 'https://cdn.example.com/'`): assets under it are recognised as yours and hashed — SRI matters most for CDN-served assets — while scripts on other hosts are still left alone.
@@ -72,7 +72,7 @@ Rollup does not emit HTML by itself, so pair this with whatever produces your HT
 
     // rollup.config.mjs
     import html from '@rollup/plugin-html'
-    import sri from 'sri-injector/rollup'
+    import sri from '@pengdows/sri-injector/rollup'
 
     export default {
       input: 'src/main.js',
@@ -123,7 +123,7 @@ Use `strict: true` in CI. Option names are checked: an unknown key such as `strc
 
     // webpack.config.js
     const HtmlWebpackPlugin = require('html-webpack-plugin')
-    const SriPlugin = require('sri-injector/webpack')
+    const SriPlugin = require('@pengdows/sri-injector/webpack')
 
     module.exports = {
       output: { publicPath: '/', filename: '[name].[contenthash].js' },
@@ -145,14 +145,14 @@ Tested with real builds (see `__tests__/*.real.test.js`):
 
 | Tool | Use | Notes |
 |---|---|---|
-| **Rolldown** | `sri-injector/rollup` | Same plugin API as Rollup; the import map for code-split chunks works too. (Vite 8 runs on Rolldown, so `sri-injector/vite` covers it.) |
-| **`@web/rollup-plugin-html`** | `sri-injector/rollup` | HTML-as-entry plugin from Modern Web. Hashes its scripts, stylesheets and lazy chunks. |
-| **Rspack / Rsbuild** | `sri-injector/webpack` | With `html-rspack-plugin` (Rspack) or Rsbuild's built-in HTML (`tools: { rspack: (c, { appendPlugins }) => appendPlugins(new Sri()) }`). Like webpack, no import map: the runtime loads lazy chunks, which an import map does not govern. Rsbuild was checked by hand; Rspack has an automated test. |
+| **Rolldown** | `@pengdows/sri-injector/rollup` | Same plugin API as Rollup; the import map for code-split chunks works too. (Vite 8 runs on Rolldown, so `@pengdows/sri-injector/vite` covers it.) |
+| **`@web/rollup-plugin-html`** | `@pengdows/sri-injector/rollup` | HTML-as-entry plugin from Modern Web. Hashes its scripts, stylesheets and lazy chunks. |
+| **Rspack / Rsbuild** | `@pengdows/sri-injector/webpack` | With `html-rspack-plugin` (Rspack) or Rsbuild's built-in HTML (`tools: { rspack: (c, { appendPlugins }) => appendPlugins(new Sri()) }`). Like webpack, no import map: the runtime loads lazy chunks, which an import map does not govern. Rsbuild was checked by hand; Rspack has an automated test. |
 
 Frameworks that render their HTML after the bundler has finished (Astro, SvelteKit prerender, Nuxt generate, Eleventy, VitePress, Docusaurus) have nothing for a bundler plugin to hook into. Run the CLI on their output directory as a post-build step:
 
-    astro build && npx sri-injector dist --strict
-    vitepress build docs && npx sri-injector docs/.vitepress/dist --strict
+    astro build && npx @pengdows/sri-injector dist --strict
+    vitepress build docs && npx @pengdows/sri-injector docs/.vitepress/dist --strict
 
 Checked against real VitePress and Astro builds: the CLI hashed VitePress's scripts, stylesheets, fonts and `modulepreload` links. Astro inlines small scripts into the HTML by default, so only scripts it emits as files (large or shared ones, or all of them with `vite.build.assetsInlineLimit: 0`) get `integrity`; inline scripts have nothing to hash.
 
@@ -168,7 +168,7 @@ Pass `--base` if the site is deployed under a sub-path or CDN. Server-rendered H
 
 `new SubresourceIntegrityInjector().insertSRIInHTML(dir, algorithm, options)` (the CLI's engine) resolves to `{ files, errors, warnings, integrityPolicy }`: the number of HTML files processed, the problems as `file: message` strings and the prepared header. It never throws for resource errors unless `strict` is set; the caller decides what is fatal (the CLI exits 1 on any error).
 
-The pieces every adapter is built from are exported too: `processPages(pages, config, runtime)` (the shared pipeline: pages in, rewritten pages and structured diagnostics out), `resolveOptions(options)` (the one place options are validated), `processDirectory(dir, options)` (the filesystem host) and, from `sri-injector/core`, the diagnostics helpers (`classify`, `formatFatal`, `CODES`). Write a new adapter by supplying how to find an asset, how to store a page and how to report diagnostics; see `adapters/rollup.js` and `adapters/webpack.js` for the two bundler hosts.
+The pieces every adapter is built from are exported too: `processPages(pages, config, runtime)` (the shared pipeline: pages in, rewritten pages and structured diagnostics out), `resolveOptions(options)` (the one place options are validated), `processDirectory(dir, options)` (the filesystem host) and, from `@pengdows/sri-injector/core`, the diagnostics helpers (`classify`, `formatFatal`, `CODES`). Write a new adapter by supplying how to find an asset, how to store a page and how to report diagnostics; see `adapters/rollup.js` and `adapters/webpack.js` for the two bundler hosts.
 
 ## Limitations
 

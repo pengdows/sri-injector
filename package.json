@@ -1,5 +1,5 @@
 {
-  "name": "sri-injector",
+  "name": "@pengdows/sri-injector",
   "version": "1.0.0",
   "description": "Inject Subresource Integrity (integrity + crossorigin) into built HTML: CLI plus Vite, Rollup and webpack plugins.",
   "keywords": [
@@ -20,7 +20,7 @@
   "author": "Pengdows LLC",
   "main": "index.js",
   "bin": {
-    "sri-injector": "./bin/cli.js"
+    "sri-injector": "bin/cli.js"
   },
   "exports": {
     ".": {
@@ -61,6 +61,9 @@
   ],
   "engines": {
     "node": ">=22.13.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "test": "jest",

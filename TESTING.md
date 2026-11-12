@@ -1,4 +1,4 @@
-# Testing sri-injector
+# Testing @pengdows/sri-injector
 
 Two layers: an automated suite that runs offline in a few seconds, and manual checks for the
 things only a real bundler, a real network or a real browser can confirm.
@@ -55,7 +55,7 @@ confirm `rollup.win32.test.js` fails, then restore it.
     </head><body></body></html>
     EOF
 
-    npx sri-injector . ; echo "exit=$?"
+    node /path/to/sri-injector/bin/cli.js . ; echo "exit=$?"
 
 Expect: `integrity`+`crossorigin` on `app.css` and `app.js`, an error line for `missing.js`,
 a `❌ … 1 resource(s) could not be processed` summary and **exit 1**. Remove the `missing.js`
@@ -68,11 +68,11 @@ Verify a hash independently (never trust the tool to check itself):
 
 Edge cases worth one run each:
 
-    echo 'x' > ..weird.js  && sed -i 's|app.js"|..weird.js"|' index.html && npx sri-injector .
+    echo 'x' > ..weird.js  && sed -i 's|app.js"|..weird.js"|' index.html && node /path/to/sri-injector/bin/cli.js .
     # must hash it, not report "traversal"; expect one warning: the tag still carried app.js's hash,
     # which is now stale for ..weird.js and gets verified and replaced
-    npx sri-injector /tmp/empty-dir ; echo $?            # ⚠️ nothing to do, exit 0
-    npx sri-injector /tmp/empty-dir --strict ; echo $?   # ❌ exit 1
+    node /path/to/sri-injector/bin/cli.js /tmp/empty-dir ; echo $?            # ⚠️ nothing to do, exit 0
+    node /path/to/sri-injector/bin/cli.js /tmp/empty-dir --strict ; echo $?   # ❌ exit 1
 
 ---
 
@@ -86,13 +86,13 @@ missing-dependency and `exports`-map mistakes):
 ### Vite (incl. CDN base, code-splitting, Integrity-Policy)
 
     mkdir -p /tmp/v/src /tmp/v/public && cd /tmp/v
-    npm i vite /tmp/sri-injector-1.0.0.tgz
+    npm i vite /tmp/pengdows-sri-injector-1.0.0.tgz
     echo '<!doctype html><html><head><script type="module" src="/src/main.js"></script></head><body><button id="b">go</button></body></html>' > index.html
     echo 'document.getElementById("b").onclick = () => import("./lazy.js")' > src/main.js
     echo 'export const x = 1' > src/lazy.js
     echo 'window.legacy = 1' > public/legacy.js
     cat > vite.config.mjs <<'EOF'
-    import sri from 'sri-injector/vite'
+    import sri from '@pengdows/sri-injector/vite'
     export default {
       base: 'https://cdn.example.com/',
       plugins: [sri({ strict: true, integrityPolicy: { headersFile: '_headers' } })],
@@ -118,11 +118,11 @@ Check, in order:
 
 ### Rollup
 
-    mkdir -p /tmp/r/src && cd /tmp/r && npm i rollup @rollup/plugin-html /tmp/sri-injector-1.0.0.tgz
+    mkdir -p /tmp/r/src && cd /tmp/r && npm i rollup @rollup/plugin-html /tmp/pengdows-sri-injector-1.0.0.tgz
     echo 'console.log(1)' > src/main.js
     cat > rollup.config.mjs <<'EOF'
     import html from '@rollup/plugin-html'
-    import sri from 'sri-injector/rollup'
+    import sri from '@pengdows/sri-injector/rollup'
     export default {
       input: 'src/main.js',
       output: { dir: 'dist', format: 'es', entryFileNames: '[name]-[hash].js' },
@@ -137,9 +137,9 @@ must fail with "No HTML files found in the bundle".
 ### Webpack (CLI as post-build step)
 
     # after `webpack` with html-webpack-plugin has written dist/
-    npx sri-injector dist --strict
+    npx @pengdows/sri-injector dist --strict
     # if output.publicPath is a CDN URL:
-    npx sri-injector dist --strict --base https://cdn.example.com/static/
+    npx @pengdows/sri-injector dist --strict --base https://cdn.example.com/static/
 
 Without `--base` on a CDN build, count the attributes — it will be 0. (A follow-up to make the
 CLI warn on "0 resources protected" is pending.)
@@ -153,7 +153,7 @@ independent source:
 
     mkdir -p /tmp/e && cd /tmp/e
     echo '<html><head><script src="https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js"></script></head></html>' > index.html
-    npx sri-injector . --external && grep -o 'integrity="[^"]*"' index.html
+    npx @pengdows/sri-injector . --external && grep -o 'integrity="[^"]*"' index.html
 
 Compare with the hash shown at <https://www.jsdelivr.com/package/npm/lodash?version=4.17.21>
 (choose "SRI" in the copy menu) — they must be identical.
@@ -198,7 +198,7 @@ Everything above proves the *attributes* are right. Only a browser proves they *
 real run. On a Windows machine:
 
     pnpm test
-    npx sri-injector dist --strict          # on a real Vite/webpack dist/
+    npx @pengdows/sri-injector dist --strict          # on a real Vite/webpack dist/
 
 and additionally confirm a file named `..foo.js` in `dist/` is hashed rather than rejected.
 

@@ -11,7 +11,7 @@ const { createExternalResolver } = require('../external')
 /**
  * Rollup plugin: injects SRI into every .html asset in the output bundle.
  * Runs in generateBundle with order 'post', so hashes cover the final emitted bytes.
- * Place it after any plugin that emits or rewrites HTML or assets. For Vite use `sri-injector/vite`,
+ * Place it after any plugin that emits or rewrites HTML or assets. For Vite use `@pengdows/sri-injector/vite`,
  * which adds Vite's `base`/`publicDir` handling and the preview-server header on top of this.
  *
  * Options (validated in lib/options; unknown keys are rejected):

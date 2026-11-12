@@ -1,4 +1,4 @@
-// Public entry for the host-agnostic building blocks (`sri-injector/core`). The implementation
+// Public entry for the host-agnostic building blocks (`@pengdows/sri-injector/core`). The implementation
 // lives in lib/, one module per concern; this barrel keeps the import path stable.
 const url = require('./lib/url')
 const integrity = require('./lib/integrity')

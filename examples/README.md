@@ -7,7 +7,7 @@ diff shows precisely what changed.
 ## `site/` — CLI / filesystem injector
 
     cp -r examples/site/input /tmp/site-copy
-    node bin/cli.js /tmp/site-copy          # (or `npx sri-injector /tmp/site-copy` once installed)
+    node bin/cli.js /tmp/site-copy          # (or `npx @pengdows/sri-injector /tmp/site-copy` once installed)
     diff examples/site/input/index.html /tmp/site-copy/index.html
 
 `input/index.html` and `input/pages/about.html` → `expected/index.html`, `expected/pages/about.html`

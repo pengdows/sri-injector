@@ -8,7 +8,7 @@ const { createBundlePlugin } = require('./rollup')
  *  - runs last (`enforce: 'post'`).
  *  - with `integrityPolicy`, the header is set on `vite preview` (not the dev server, which serves
  *    unhashed source modules and would be blocked entirely).
- * Options are those of `sri-injector/rollup`.
+ * Options are those of `@pengdows/sri-injector/rollup`.
  */
 function sriVitePlugin(options = {}) {
     const config = resolveOptions(options)

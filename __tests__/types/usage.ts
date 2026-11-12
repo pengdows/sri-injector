@@ -1,10 +1,10 @@
 // Compiled by __tests__/types.test.js under `strict`. Lines marked @ts-expect-error must NOT compile:
 // if the types become too loose, the directive itself becomes an error and the build fails.
-import SubresourceIntegrityInjector, { injectSri, processPages, resolveOptions, processDirectory } from 'sri-injector';
-import sriRollup from 'sri-injector/rollup';
-import sriVite from 'sri-injector/vite';
-import SriWebpackPlugin from 'sri-injector/webpack';
-import { classify, formatFatal, CODES } from 'sri-injector/core';
+import SubresourceIntegrityInjector, { injectSri, processPages, resolveOptions, processDirectory } from '@pengdows/sri-injector';
+import sriRollup from '@pengdows/sri-injector/rollup';
+import sriVite from '@pengdows/sri-injector/vite';
+import SriWebpackPlugin from '@pengdows/sri-injector/webpack';
+import { classify, formatFatal, CODES } from '@pengdows/sri-injector/core';
 import type { RollupOptions } from 'rollup';
 import type { UserConfig } from 'vite' with { 'resolution-mode': 'import' };
 import type { Configuration } from 'webpack';
