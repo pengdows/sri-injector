@@ -1,6 +1,6 @@
 {
   "name": "@pengdows/sri-injector",
-  "version": "1.0.0",
+  "version": "0.9.0",
   "description": "Inject Subresource Integrity (integrity + crossorigin) into built HTML: CLI plus Vite, Rollup and webpack plugins.",
   "keywords": [
     "sri",

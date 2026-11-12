@@ -86,7 +86,7 @@ missing-dependency and `exports`-map mistakes):
 ### Vite (incl. CDN base, code-splitting, Integrity-Policy)
 
     mkdir -p /tmp/v/src /tmp/v/public && cd /tmp/v
-    npm i vite /tmp/pengdows-sri-injector-1.0.0.tgz
+    npm i vite /tmp/pengdows-sri-injector-0.9.0.tgz
     echo '<!doctype html><html><head><script type="module" src="/src/main.js"></script></head><body><button id="b">go</button></body></html>' > index.html
     echo 'document.getElementById("b").onclick = () => import("./lazy.js")' > src/main.js
     echo 'export const x = 1' > src/lazy.js
@@ -118,7 +118,7 @@ Check, in order:
 
 ### Rollup
 
-    mkdir -p /tmp/r/src && cd /tmp/r && npm i rollup @rollup/plugin-html /tmp/pengdows-sri-injector-1.0.0.tgz
+    mkdir -p /tmp/r/src && cd /tmp/r && npm i rollup @rollup/plugin-html /tmp/pengdows-sri-injector-0.9.0.tgz
     echo 'console.log(1)' > src/main.js
     cat > rollup.config.mjs <<'EOF'
     import html from '@rollup/plugin-html'

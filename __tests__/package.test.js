@@ -50,6 +50,19 @@ describe('manifest', () => {
     }
   });
 
+  test('TESTING.md installs the tarball for the current version', () => {
+    const tarball = `${pkg.name.replace(/^@/, '').replace('/', '-')}-${pkg.version}.tgz`;
+    const text = fs.readFileSync(path.join(ROOT, 'TESTING.md'), 'utf8');
+    expect([...text.matchAll(/\/tmp\/(\S+\.tgz)/g)].map(m => m[1])).toEqual([tarball, tarball]);
+  });
+
+  test('SECURITY.md tells people to report privately, to a real address, and does not send them to public issues', () => {
+    const text = fs.readFileSync(path.join(ROOT, 'SECURITY.md'), 'utf8');
+    expect(text).toContain('software@pengdows.com');
+    expect(text).toMatch(/do not (open|file|report)[^.]*public/i);
+    expect(text).toMatch(/supported versions/i);
+  });
+
   test('is MIT licensed, and the LICENSE file says so and ships in the tarball', () => {
     expect(pkg.license).toBe('MIT');
     const text = fs.readFileSync(path.join(ROOT, 'LICENSE'), 'utf8');
