@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Only the latest `0.9.x` release of `@pengdows/sri-injector` receives security fixes.
+Only the latest `1.x` release of `@pengdows/sri-injector` receives security fixes.
 
 ## Reporting a vulnerability
 
