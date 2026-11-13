@@ -53,6 +53,12 @@ function createExternalResolver({ timeout = 10000, fetch: fetchImpl } = {}) {
             if (res.status === 404) return null
             if (!res.ok) throw new Error(`server responded with HTTP ${res.status}`)
 
+            // Servers that tailor the body to the client (fonts.googleapis.com sends different CSS per
+            // browser) would pin what Node was sent, which no real browser receives.
+            if (/(^|,)\s*user-agent\s*(,|$)/i.test(res.headers.get('vary') || '')) {
+                throw new SkipResource('server varies its response by User-Agent, so the bytes Node receives are not what browsers receive; tag left unchanged')
+            }
+
             const acao = res.headers.get('access-control-allow-origin')
             if (acao !== '*' && acao !== PROBE_ORIGIN) {
                 throw new SkipResource(

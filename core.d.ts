@@ -1,5 +1,5 @@
 import type {
-  AssetResolver,
+  AssetResolver, CheckPageResult,
   Diagnostic, DiagnosticCode, InjectOptions, InjectResult, Page, PipelineResult, PipelineRuntime,
   ResolvedOptions, SriOptions, HashAlgorithm, CrossOrigin, IntegrityPolicyHeader, IntegrityPolicyOption
 } from './types';
@@ -8,6 +8,8 @@ export * from './types';
 
 export function injectSri(html: string, resolveAsset: AssetResolver, options?: InjectOptions): Promise<InjectResult>;
 export function processPages(pages: Page[], config: ResolvedOptions, runtime?: PipelineRuntime): Promise<PipelineResult>;
+/** Validates the integrity metadata already in one page, without changing it (what --check runs per page). */
+export function checkPage(html: string, resolveAsset: AssetResolver, options?: { base?: string; resolveExternal?: AssetResolver; policy?: ResolvedOptions['policy'] }): Promise<CheckPageResult>;
 export function resolveOptions(options?: SriOptions): ResolvedOptions;
 
 export const CODES: { readonly [K in DiagnosticCode]: K };
@@ -17,6 +19,7 @@ export function noHtmlDiagnostic(where: string): Diagnostic;
 export function classify(diagnostics: Diagnostic[], options?: { strict?: boolean }): { fatal: Diagnostic[]; warnings: Diagnostic[] };
 export function formatDiagnostic(diagnostic: Pick<Diagnostic, 'message' | 'file'>): string;
 export function formatFatal(fatal: Diagnostic[]): string;
+export function integrityReplacedMessage(url: string, existing: string, options?: { preview?: boolean }): string;
 
 export class SkipResource extends Error {
   constructor(reason: string);

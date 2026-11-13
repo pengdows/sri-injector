@@ -1,10 +1,10 @@
 // Compiled by __tests__/types.test.js under `strict`. Lines marked @ts-expect-error must NOT compile:
 // if the types become too loose, the directive itself becomes an error and the build fails.
-import SubresourceIntegrityInjector, { injectSri, processPages, resolveOptions, processDirectory } from '@pengdows/sri-injector';
+import SubresourceIntegrityInjector, { injectSri, processPages, resolveOptions, processDirectory, checkDirectory } from '@pengdows/sri-injector';
 import sriRollup from '@pengdows/sri-injector/rollup';
 import sriVite from '@pengdows/sri-injector/vite';
 import SriWebpackPlugin from '@pengdows/sri-injector/webpack';
-import { classify, formatFatal, CODES } from '@pengdows/sri-injector/core';
+import { classify, formatFatal, CODES, checkPage } from '@pengdows/sri-injector/core';
 import type { RollupOptions } from 'rollup';
 import type { UserConfig } from 'vite' with { 'resolution-mode': 'import' };
 import type { Configuration } from 'webpack';
@@ -24,6 +24,8 @@ sriVite({ strcit: true });
 new SriWebpackPlugin({ crossorigin: 'yes' });
 // @ts-expect-error timeout is a number
 sriRollup({ externalTimeout: '10s' });
+// @ts-expect-error dryRun belongs to the directory host, not the plugins
+sriVite({ dryRun: true });
 
 // ---- the core API
 async function api() {
@@ -49,8 +51,31 @@ async function api() {
   const errors: string[] = run.errors;
   void [files, errors];
 
-  const dir = await processDirectory('./dist', { external: false });
-  void dir.diagnostics;
+  const dry = await injector.insertSRIInHTML('./dist', 'sha384', { dryRun: true, manifestFile: 'sri-manifest.json' });
+  const pending: number = dry.changes.length;
+  const kind: 'add-integrity' | 'replace-integrity' | 'add-crossorigin' | 'update-import-map' | 'update-headers-file' | 'update-manifest-file' | undefined = dry.changes[0]?.kind;
+  const pageChanges: number = r.changes.length;
+  void [pending, kind, pageChanges];
+
+  const dir = await processDirectory('./dist', { external: false, dryRun: true });
+  const wasDry: boolean = dir.dryRun;
+  void [dir.diagnostics, dir.changes, wasDry];
+  // @ts-expect-error dryRun is a boolean
+  await processDirectory('./dist', { dryRun: 'yes' });
+
+  const checked = await checkDirectory('./dist', { base: '/', external: true, strict: true });
+  const passed: boolean = checked.passed;
+  const found: boolean = checked.integrityFound;
+  const missingCount: number = checked.counts.missing + checked.counts['not-found'];
+  const result = checked.results[0];
+  const status: 'ok' | 'missing' | 'wrong' | 'not-found' | 'skipped' | 'unchecked' | 'blocked' | undefined = result?.status;
+  const target: 'tag' | 'import-map' | undefined = result?.target;
+  const file: string | undefined = result?.file;
+  void [passed, found, missingCount, status, target, file, checked.diagnostics];
+  const page = await checkPage('<script src="/a.js"></script>', () => 'x', { base: '/' });
+  void [page.results, page.problems];
+  // @ts-expect-error checkDirectory never writes, so it takes no dryRun option
+  await checkDirectory('./dist', { dryRun: true });
 
   // @ts-expect-error resolveAsset must return bytes, null or a promise of them
   await injectSri('', () => 42);

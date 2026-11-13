@@ -2,7 +2,7 @@ const fs = require('fs')
 const path = require('path')
 const { resolveOptions } = require('../lib/options')
 const { processPages } = require('../lib/pipeline')
-const { classify, formatFatal, formatDiagnostic, noHtmlDiagnostic } = require('../lib/diagnostics')
+const { classify, formatFatal, formatDiagnostic, noHtmlDiagnostic, warning, CODES } = require('../lib/diagnostics')
 const { normalizeBase, outputPathFor, isInsideDir, isExternal } = require('../lib/url')
 const { calculateBase64Hash } = require('../lib/integrity')
 const { sourceToString } = require('../lib/source')
@@ -19,7 +19,7 @@ const { createExternalResolver } = require('../external')
  *  - algorithm: 'sha256' | 'sha384' (default) | 'sha512'
  *  - crossorigin: 'anonymous' (default) | 'use-credentials', written to tags that have none
  *  - strict:    also fail the build when no output contained HTML. (Unresolvable resources always fail
- *               the build, as in the CLI and the webpack plugin; mark a tag `skip-sri` to opt it out.)
+ *               the build, as in the CLI and the webpack plugin; mark a tag `data-skip-sri` to opt it out.)
  *  - base:      public base path or URL (default '/'). When it is a full URL (CDN deployment), assets
  *               under it are hashed instead of being skipped as external.
  *  - publicDir: extra dir checked for files not in the bundle
@@ -30,6 +30,8 @@ const { createExternalResolver } = require('../external')
  *  - importMap:  add an import map "integrity" section covering every chunk reachable from the page's
  *                scripts through static and dynamic imports (code-split chunks never appear in the
  *                HTML, so this is the only way to give them integrity). Default true.
+ *  - manifest:   add an `integrity` field to every entry of a Vite build manifest (`build.manifest`),
+ *                for backends that render the tags themselves. Default true.
  *  - integrityPolicy: true | 'report-only' | { reportOnly, endpoints, headersFile }. Prepares the
  *                Integrity-Policy response header, which makes browsers block any script without
  *                integrity. Every uncovered <script> therefore becomes a build error; with
@@ -82,6 +84,7 @@ function createBundlePlugin(config, getEnv = () => ({}), { headerNote = '' } = {
                 const publicDir = env.publicDir !== undefined ? env.publicDir : config.publicDir
                 if (config.external && !resolveExternal) resolveExternal = createExternalResolver({ timeout: config.externalTimeout })
                 outputsSeen++
+                if (config.manifest) addManifestIntegrity(this, bundle, config.algorithm)
 
                 const pages = Object.entries(bundle)
                     .filter(([name, item]) => item.type === 'asset' && name.endsWith('.html'))
@@ -100,6 +103,7 @@ function createBundlePlugin(config, getEnv = () => ({}), { headerNote = '' } = {
                 const result = await processPages(pages, config, {
                     base,
                     resolveExternal,
+                    extraDiagnostics: pages.length ? lazyStylesheetDiagnostics(bundle, pages) : [],
                     headersFile: headersFile && {
                         // Start from whatever the user already ships: an asset another plugin emitted, or
                         // the copy in publicDir (Vite copies publicDir to the output, where our emitted
@@ -130,6 +134,58 @@ function createBundlePlugin(config, getEnv = () => ({}), { headerNote = '' } = {
             }
         }
     }
+}
+
+/** Vite's build manifest: `manifest.json` or `.vite/manifest.json` (also `ssr-manifest.json`, which has no `file` entries and is skipped). */
+const isManifest = (name) => /(^|\/)(\.vite\/)?manifest\.json$/.test(name)
+
+/**
+ * For backends that render the <script>/<link> tags themselves from the manifest: adds `integrity` to
+ * every entry whose `file` is in the bundle, right after `file`. The hash is of the emitted file,
+ * so it is what the tag must carry. Re-running only refreshes the value.
+ */
+function addManifestIntegrity(ctx, bundle, algorithm) {
+    for (const [name, item] of Object.entries(bundle)) {
+        if (item.type !== 'asset' || !isManifest(name)) continue
+        let manifest
+        try { manifest = JSON.parse(sourceToString(item.source)) } catch (err) {
+            ctx.warn(`sri-injector: ${name} is not valid JSON, so no integrity was added to it: ${err.message}`)
+            continue
+        }
+        if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) continue
+        let changed = false
+        for (const [key, entry] of Object.entries(manifest)) {
+            const file = entry && typeof entry === 'object' ? entry.file : undefined
+            const emitted = typeof file === 'string' ? bundle[file] : undefined
+            if (!emitted) continue
+            const hash = `${algorithm}-${calculateBase64Hash(emitted.type === 'chunk' ? emitted.code : emitted.source, algorithm)}`
+            if (entry.integrity === hash) continue
+            const { integrity, ...rest } = entry
+            manifest[key] = Object.fromEntries(Object.entries(rest).flatMap(([k, v]) => (k === 'file' ? [[k, v], ['integrity', hash]] : [[k, v]])))
+            changed = true
+        }
+        if (changed) item.source = JSON.stringify(manifest, null, 2)
+    }
+}
+
+/**
+ * Vite records the CSS each chunk needs in `viteMetadata.importedCss`. For a lazy chunk that CSS is
+ * loaded at runtime by a <link> element created from JS, which no HTML tag stands for, so it cannot
+ * get integrity (import maps only govern module scripts). Warn about every such file; the fix is
+ * `build.cssCodeSplit: false`, which puts all CSS in one stylesheet linked from the HTML.
+ */
+function lazyStylesheetDiagnostics(bundle, pages) {
+    const referenced = (css) => pages.some(p => p.html.includes(css))
+    const lazy = new Set()
+    for (const item of Object.values(bundle)) {
+        if (item.type !== 'chunk' || !item.viteMetadata) continue
+        for (const css of item.viteMetadata.importedCss || []) {
+            if (!referenced(css)) lazy.add(css)
+        }
+    }
+    return [...lazy].map(css => warning(CODES.LAZY_STYLESHEET,
+        `Stylesheet "${css}" is loaded at runtime by a lazy chunk, so it has no integrity (no HTML tag references it). Set build.cssCodeSplit to false to link all CSS from the HTML.`,
+        { url: css }))
 }
 
 /**

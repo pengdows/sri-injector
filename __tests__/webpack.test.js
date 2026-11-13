@@ -100,10 +100,12 @@ describe('unresolvable resources', () => {
     expect(r.errors.join('\n')).toMatch(/1 resource\(s\) could not be processed[\s\S]*missing\.js/);
   });
 
-  test('skip-sri opts a tag out', async () => {
-    const r = await build({ html: { templateContent: '<html><head></head><body><script src="/runtime-config.js" skip-sri></script></body></html>' } });
+  test('data-skip-sri opts a tag out', async () => {
+    const r = await build({ html: { templateContent: '<html><head></head><body><script src="/runtime-config.js" data-skip-sri></script></body></html>' } });
     expect(r.errors).toEqual([]);
-    expect(r.read('index.html').toString('utf8')).not.toMatch(/skip-sri/);
+    // No integrity, and the marker is removed from the final output.
+    // (html-webpack-plugin minifies, so the src may be unquoted.)
+    expect(r.read('index.html').toString('utf8')).toMatch(/<script src="?\/runtime-config\.js"?><\/script>/);
   });
 
   test('strict keeps failing too', async () => {
@@ -224,4 +226,48 @@ test('the crossorigin option is applied', async () => {
 
 test('an invalid crossorigin value is rejected at configuration time', () => {
   expect(() => new SriWebpackPlugin({ crossorigin: 'sometimes' })).toThrow(/crossorigin/);
+});
+
+describe('review: precompressed HTML', () => {
+  // The same shape as compression-webpack-plugin 12: taps OPTIMIZE_TRANSFER with additionalAssets,
+  // which re-fires only for new file names, never for a later updateAsset of the HTML.
+  const zlib = require('zlib');
+  class FakeCompression {
+    apply(compiler) {
+      compiler.hooks.thisCompilation.tap('fake-compression', (compilation) => {
+        compilation.hooks.processAssets.tap(
+          { name: 'fake-compression', stage: webpack.Compilation.PROCESS_ASSETS_STAGE_OPTIMIZE_TRANSFER, additionalAssets: true },
+          () => {
+            for (const { name, source } of compilation.getAssets()) {
+              if (!name.endsWith('.html')) continue;
+              compilation.emitAsset(`${name}.gz`, new webpack.sources.RawSource(zlib.gzipSync(source.buffer())));
+            }
+          });
+      });
+    }
+  }
+
+  test.each([true, false])('index.html.gz carries the SRI too, whichever plugin is listed first (sriFirst=%s)', async (sriFirst) => {
+    const sri = new SriWebpackPlugin();
+    const htmlPlugin = new HtmlWebpackPlugin({ inject: 'head' });
+    const compiler = webpack({
+      mode: 'production', context: dir, entry: './src/index.js', devtool: false,
+      output: { path: path.join(dir, 'dist'), filename: '[name].js', publicPath: '/' },
+      plugins: sriFirst ? [sri, htmlPlugin, new FakeCompression()] : [htmlPlugin, new FakeCompression(), sri],
+    });
+    await new Promise((res, rej) => compiler.run((e) => (e ? rej(e) : compiler.close(res))));
+    const html = fs.readFileSync(path.join(dir, 'dist', 'index.html'), 'utf8');
+    const gz = zlib.gunzipSync(fs.readFileSync(path.join(dir, 'dist', 'index.html.gz'))).toString('utf8');
+    expect(html).toContain('integrity="sha384-');
+    expect(gz).toBe(html);
+  });
+});
+
+describe('review: worker chunks', () => {
+  test('a Worker entry does not fail an enforcing build (its destination is "worker", not "script")', async () => {
+    fs.writeFileSync(path.join(dir, 'src', 'index.js'), 'new Worker(new URL("./w.js", import.meta.url)); console.log("main");');
+    fs.writeFileSync(path.join(dir, 'src', 'w.js'), 'postMessage("hi");');
+    const r = await build({ sriOptions: { integrityPolicy: true } });
+    expect(r.errors).toEqual([]);
+  });
 });

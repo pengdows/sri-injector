@@ -224,6 +224,77 @@ describe('injectSri: existing integrity attributes', () => {
   });
 });
 
+describe('injectSri: changes (what a dry run or --check reports)', () => {
+  const crypto = require('crypto');
+  const CONTENT = Buffer.from('var a=1');
+  const HASH = `sha384-${crypto.createHash('sha384').update(CONTENT).digest('base64')}`;
+  const resolve = () => CONTENT;
+  const run = (head, options = {}) => injectSri(`<html><head>${head}</head><body></body></html>`, resolve, { algorithm: 'sha384', ...options });
+
+  test('a fresh tag reports added integrity and crossorigin, in that order', async () => {
+    const { changes } = await run('<script src="a.js"></script>');
+    expect(changes).toEqual([{ kind: 'add-integrity', url: 'a.js' }, { kind: 'add-crossorigin', url: 'a.js' }]);
+  });
+
+  test('a stale value is reported as replaced; an empty one as added', async () => {
+    const stale = await run('<script src="a.js" integrity="sha384-STALE" crossorigin="anonymous"></script>');
+    expect(stale.changes).toEqual([{ kind: 'replace-integrity', url: 'a.js' }]);
+    const empty = await run('<script src="a.js" integrity="" crossorigin="anonymous"></script>');
+    expect(empty.changes).toEqual([{ kind: 'add-integrity', url: 'a.js' }]);
+  });
+
+  test('a valid value with no crossorigin reports only the crossorigin', async () => {
+    const { changes } = await run(`<script src="a.js" integrity="${HASH}"></script>`);
+    expect(changes).toEqual([{ kind: 'add-crossorigin', url: 'a.js' }]);
+  });
+
+  test('the URL is the one resolved against <base href>, i.e. the file that was hashed', async () => {
+    const { changes } = await run('<base href="/app/"><link rel="stylesheet" href="s.css">');
+    expect(changes.map(c => c.url)).toEqual(['/app/s.css', '/app/s.css']);
+  });
+
+  test('a data-skip-sri tag gets no integrity and is not listed as a change; the marker is removed', async () => {
+    const { html, changes, warnings } = await run('<script src="/rt.js" data-skip-sri></script>');
+    expect(changes).toEqual([]);
+    expect(html).toBe('<html><head><script src="/rt.js"></script></head><body></body></html>');
+    expect(warnings).toEqual([]);
+  });
+
+  test('a bare skip-sri attribute is not an opt-out: the tag gets SRI like any other', async () => {
+    const { html, changes } = await run('<script src="/rt.js" skip-sri></script>');
+    expect(changes).toEqual([{ kind: 'add-integrity', url: '/rt.js' }, { kind: 'add-crossorigin', url: '/rt.js' }]);
+    expect(html).toContain(`integrity="${HASH}"`);
+  });
+
+  test('adding or merging import map entries is a change; an up-to-date map is not', async () => {
+    const importMapIntegrity = () => ({ '/lazy.js': 'sha384-LAZY' });
+    const first = await run(`<script type="module" src="a.js" integrity="${HASH}" crossorigin></script>`, { importMapIntegrity });
+    expect(first.changes).toEqual([{ kind: 'update-import-map' }]);
+    const second = await injectSri(first.html, resolve, { algorithm: 'sha384', importMapIntegrity });
+    expect(second.changes).toEqual([]);
+  });
+
+  test('problems are diagnostics, not changes: a missing or skipped resource changes nothing', async () => {
+    const missing = await injectSri('<script src="gone.js"></script>', () => null);
+    expect(missing.changes).toEqual([]);
+    expect(missing.errors).toHaveLength(1);
+    const { SkipResource } = require('../core');
+    const skipped = await injectSri('<script src="https://x.example/a.js"></script>', resolve, { resolveExternal: () => { throw new SkipResource('no CORS'); } });
+    expect(skipped.changes).toEqual([]);
+  });
+
+  test.each([
+    ['an up-to-date tag', `<script src="a.js" integrity="${HASH}" crossorigin="anonymous"></script>`],
+    ['a fresh tag', '<script src="a.js"></script>'],
+    ['a stale tag', '<link rel="stylesheet" href="s.css" integrity="sha256-OLD">'],
+    ['an external tag (skipped)', '<script src="https://cdn.example/x.js"></script>'],
+    ['no tags at all', '<p>hi</p>'],
+  ])('changes is empty exactly when no SRI edit was made: %s', async (_name, head) => {
+    const { changes, modified } = await run(head);
+    expect(changes.length > 0).toBe(modified);
+  });
+});
+
 describe('injectSri: external resources via resolveExternal', () => {
   const { SkipResource } = require('../core');
   const EXT = 'https://www.example.com/some.js';

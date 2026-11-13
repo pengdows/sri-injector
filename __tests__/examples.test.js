@@ -59,18 +59,89 @@ describe('examples/site', () => {
     expect({ files: result.files, errors: result.errors, warnings: result.warnings }).toEqual(expected);
   });
 
-  test('is idempotent: processing the expected output again changes nothing', async () => {
+  test('processing the expected output again changes nothing; the only error is the opted-out tag', async () => {
     const again = fs.mkdtempSync(path.join(os.tmpdir(), 'sri-example-again-'));
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
     try {
       fs.copySync(path.join(example, 'input'), again);
       for (const rel of htmlFiles(again)) fs.copySync(path.join(example, 'expected', rel), path.join(again, rel));
       const before = Object.fromEntries(htmlFiles(again).map(rel => [rel, fs.readFileSync(path.join(again, rel), 'utf8')]));
       const r = await new SubresourceIntegrityInjector().insertSRIInHTML(again, 'sha384');
       expect(r.warnings).toEqual([]);
+      // The first run removed data-skip-sri, so a second run sees an ordinary tag whose file the
+      // build does not own. Every other tag is already correct, so nothing else is reported.
+      expect(r.errors).toEqual([expect.stringMatching(/^index\.html: Could not process resource "\/runtime-config\.js": not found/)]);
       for (const rel of htmlFiles(again)) expect(fs.readFileSync(path.join(again, rel), 'utf8')).toBe(before[rel]);
     } finally {
+      spy.mockRestore();
       fs.removeSync(again);
     }
+  });
+
+  describe('data-skip-sri', () => {
+    const TAG_IN = '<script src="/runtime-config.js" data-skip-sri defer></script>';
+    const TAG_OUT = '<script src="/runtime-config.js" defer></script>';
+    // Elements carrying the attribute, as a parser sees them (the page's comments also mention its name).
+    const marked = (html) => {
+      const found = [];
+      const visit = (node) => {
+        if (node.attrs && node.attrs.some(a => a.name === 'data-skip-sri')) found.push(node.attrs.find(a => a.name === 'src').value);
+        (node.childNodes || []).forEach(visit);
+      };
+      visit(require('parse5').parse(html));
+      return found;
+    };
+
+    test('the input carries the attribute', () => {
+      const input = fs.readFileSync(path.join(example, 'input', 'index.html'), 'utf8');
+      expect(input).toContain(TAG_IN);
+      expect(marked(input)).toEqual(['/runtime-config.js']);
+    });
+
+    test('a real run removes the attribute and adds no SRI to the tag', () => {
+      const out = fs.readFileSync(path.join(work, 'index.html'), 'utf8');
+      expect(marked(out)).toEqual([]);
+      expect(out).toContain(TAG_OUT); // exactly this: no integrity, no crossorigin
+      expect(result.errors).toEqual([]); // its file is not in the output, and that is fine
+    });
+
+    describe('a dry run', () => {
+      let dry, before, after, real;
+      // Every file in the site, with its bytes and modification time.
+      const snapshot = (dir) => Object.fromEntries(
+        fs.readdirSync(dir, { recursive: true, withFileTypes: true }).filter(e => e.isFile()).map(e => {
+          const full = path.join(e.parentPath || e.path, e.name);
+          return [path.relative(dir, full), [fs.readFileSync(full).toString('base64'), fs.statSync(full).mtimeMs]];
+        }));
+
+      beforeAll(async () => {
+        const site = fs.mkdtempSync(path.join(os.tmpdir(), 'sri-example-dry-'));
+        try {
+          fs.copySync(path.join(example, 'input'), site);
+          const spy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+          before = snapshot(site);
+          dry = await new SubresourceIntegrityInjector().insertSRIInHTML(site, 'sha384', { dryRun: true });
+          after = snapshot(site);
+          real = await new SubresourceIntegrityInjector().insertSRIInHTML(site, 'sha384');
+          spy.mockRestore();
+        } finally {
+          fs.removeSync(site);
+        }
+      });
+
+      test('does not remove the attribute: no file is written, changed or deleted', () => {
+        expect(after).toEqual(before);
+        const html = Buffer.from(after['index.html'][0], 'base64').toString('utf8');
+        expect(html).toContain(TAG_IN);
+        expect(marked(html)).toEqual(['/runtime-config.js']);
+      });
+
+      test('does not list the opted-out tag, and otherwise previews exactly what the real run does', () => {
+        expect(dry.changes.some(c => c.url === '/runtime-config.js')).toBe(false);
+        expect(dry.changes).toEqual(real.changes);
+        expect(dry.errors).toEqual([]);
+      });
+    });
   });
 });
 
@@ -112,5 +183,23 @@ describe('examples/rollup-bundle', () => {
   test('chunks are not modified', () => {
     const original = fs.readJsonSync(path.join(example, 'bundle.json'));
     for (const k of Object.keys(original)) if (original[k].type === 'chunk') expect(bundle[k].code).toBe(original[k].code);
+  });
+});
+
+describe('examples/microfrontend', () => {
+  test('--manifest-file hashes every remote file, including the lazy chunks that no HTML mentions', async () => {
+    const work = fs.mkdtempSync(path.join(os.tmpdir(), 'sri-mf-'));
+    try {
+      fs.copySync(path.join(EXAMPLES, 'microfrontend', 'remote'), work);
+      await new SubresourceIntegrityInjector().insertSRIInHTML(work, 'sha384', { manifestFile: 'sri-manifest.json' });
+      const { files } = JSON.parse(fs.readFileSync(path.join(work, 'sri-manifest.json'), 'utf8'));
+      expect(Object.keys(files)).toEqual(['assets/leaf.js', 'assets/main.js', 'assets/style.css', 'assets/widget.js', 'entry.json']);
+      const crypto = require('crypto');
+      for (const [file, hash] of Object.entries(files)) {
+        expect(hash).toBe('sha384-' + crypto.createHash('sha384').update(fs.readFileSync(path.join(work, file))).digest('base64'));
+      }
+    } finally {
+      fs.removeSync(work);
+    }
   });
 });

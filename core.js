@@ -8,6 +8,7 @@ const { SkipResource } = require('./lib/errors')
 const { validateCrossorigin, resolveOptions } = require('./lib/options')
 const diagnostics = require('./lib/diagnostics')
 const { processPages } = require('./lib/pipeline')
+const { checkPage } = require('./lib/check')
 
 module.exports = {
     injectSri,
@@ -15,6 +16,7 @@ module.exports = {
     validateCrossorigin,
     resolveOptions,
     processPages,
+    checkPage,
     ...diagnostics,
     ...url,
     ...integrity,

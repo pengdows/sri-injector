@@ -23,11 +23,21 @@ diff shows precisely what changed.
 | `<script src="/assets/vendor.js" integrity="sha256-…">` (correct) | **kept as is** | existing value verified against the file; a valid hash is not rewritten even though the run uses sha384 |
 | `<script src="/assets/app.js" integrity="sha384-STALE-VALUE" crossorigin="use-credentials">` | hash replaced, `crossorigin` kept | stale value → replaced and reported in `result.json` as a warning |
 | `<script src="/assets/..odd.js">` | hashed | a name that merely starts with `..` is not path traversal |
+| `<script src="/runtime-config.js" data-skip-sri defer>` | `data-skip-sri` removed, nothing added: `<script src="/runtime-config.js" defer>` | opted out; the server generates this file, so it is not in the output and is not an error. `--dry-run` leaves the attribute in place |
 | `<script src="https://cdn.example.net/analytics.js">` | untouched | external (no `--external`) |
 | inline `<script>`, `rel="icon"`, `rel="prefetch"` | untouched | SRI does not apply |
 | `pages/about.html`: `href="../assets/site.css"` | hashed, same hash as in index.html | relative URLs resolve from the HTML file's directory |
 
 `expected/result.json` is the injector's return value: `{ files: 2, errors: [], warnings: [one stale hash] }`.
+
+To see the dry run leave everything alone, including the `data-skip-sri` attribute:
+
+    cp -r examples/site/input /tmp/site-dry
+    node bin/cli.js /tmp/site-dry --dry-run
+    diff -r examples/site/input /tmp/site-dry     # no output: nothing was written
+
+Running the tool again on `expected/` fails on `/runtime-config.js`: the first run removed its
+`data-skip-sri`, so the second sees an ordinary tag whose file is not in the output.
 
 The rest of each page is byte-for-byte what you wrote: only the tags above change (compare with
 `diff examples/site/input/index.html examples/site/expected/index.html`). The tool patches those
@@ -59,3 +69,8 @@ imports another, plus an orphan chunk nothing references. Run with
 Then read `git diff examples/` before committing. A golden file only certifies that output has not
 changed since a person verified it; the hashes here were checked independently with
 `openssl dgst -sha384 -binary <file> | base64` when they were first recorded.
+
+## `microfrontend/` — a shell loading a remote at runtime
+
+Not a golden-file example: a runnable shell and remote showing `--manifest-file`, with the loader code the
+shell needs. See [microfrontend/README.md](microfrontend/README.md).

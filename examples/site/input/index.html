@@ -19,6 +19,9 @@
   <!-- a file whose name merely starts with ".." -->
   <script src="/assets/..odd.js"></script>
 
+  <!-- opted out with data-skip-sri: the server generates this file, so it is not in the output -->
+  <script src="/runtime-config.js" data-skip-sri defer></script>
+
   <!-- untouched: external, inline, icon, prefetch -->
   <script src="https://cdn.example.net/analytics.js" defer></script>
   <script>window.inline = true;</script>

@@ -94,17 +94,27 @@ describe('processPages', () => {
     expect(r.diagnostics).toEqual([]);
   });
 
+  test('tags every change with the page it came from, like diagnostics', async () => {
+    const r = await processPages([page('sub/index.html', '<script src="/a.js"></script>', { '/a.js': 'x' }), page('plain.html', '<p>hi</p>')], config());
+    expect(r.pages[0].changes).toEqual([
+      { file: 'sub/index.html', kind: 'add-integrity', url: '/a.js' },
+      { file: 'sub/index.html', kind: 'add-crossorigin', url: '/a.js' },
+    ]);
+    expect(r.pages[1].changes).toEqual([]);
+  });
+
   test('tags every diagnostic with the page it came from', async () => {
     const r = await processPages([page('sub/page.html', '<script src="/missing.js"></script>')], config());
     expect(r.diagnostics).toHaveLength(1);
     expect(r.diagnostics[0]).toMatchObject({ severity: 'error', code: CODES.RESOURCE_NOT_FOUND, file: 'sub/page.html', url: '/missing.js' });
   });
 
-  test('skip-sri leaves a tag alone, removes the marker attribute and raises no error', async () => {
-    const r = await processPages([page('i.html', '<script src="/runtime-config.js" skip-sri></script>')], config());
+  test('data-skip-sri: no integrity, no error, and the marker is removed from the output', async () => {
+    const r = await processPages([page('i.html', '<script src="/runtime-config.js" data-skip-sri></script>')], config());
     expect(r.diagnostics).toEqual([]);
     expect(r.pages[0].html).toBe('<script src="/runtime-config.js"></script>');
     expect(r.pages[0].modified).toBe(true);
+    expect(r.pages[0].changes).toEqual([]);
   });
 
   test('uses a per-page import map callback when one is given', async () => {

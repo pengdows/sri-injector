@@ -9,6 +9,16 @@ const { createExternalResolver } = require('../external')
 const PLUGIN_NAME = 'sri-injector'
 
 /**
+ * A `new Worker(new URL(...))` entry is an entrypoint that is not initial for any page. Its script is
+ * fetched with destination "worker", which `blocked-destinations=(script)` does not cover.
+ */
+function isWorkerEntry(chunk) {
+    const groups = [...chunk.groupsIterable]
+    // Not initial and with no parent group: nothing loads it as a script chunk, it is its own root.
+    return groups.length > 0 && groups.every(g => typeof g.getParents === 'function' && g.getParents().length === 0)
+}
+
+/**
  * webpack's chunk loader creates the <script> for a lazy chunk at runtime, with no integrity, so an
  * Integrity-Policy header would make browsers block every one of them. Reports each such JS file:
  * an error when the policy is enforced, a warning when it is report-only (nothing is blocked).
@@ -17,7 +27,7 @@ function lazyChunkDiagnostics(compilation, { reportOnly }) {
     const make = reportOnly ? warning : error
     const files = []
     for (const chunk of compilation.chunks) {
-        if (chunk.canBeInitial()) continue
+        if (chunk.canBeInitial() || isWorkerEntry(chunk)) continue
         for (const file of chunk.files) if (/\.[cm]?js$/.test(file)) files.push(file)
     }
     return files.map(file => make(
@@ -31,7 +41,10 @@ function lazyChunkDiagnostics(compilation, { reportOnly }) {
  * webpack plugin: injects SRI into every .html asset in the compilation (e.g. from
  * html-webpack-plugin). Runs in processAssets at PROCESS_ASSETS_STAGE_OPTIMIZE_TRANSFER, after
  * html-webpack-plugin emits the page (OPTIMIZE_INLINE) and after content hashing, so hashes cover
- * the final emitted bytes and plugin order in `plugins` does not matter.
+ * the final emitted bytes and plugin order in `plugins` does not matter. It runs one step before
+ * OPTIMIZE_TRANSFER itself, where compression-webpack-plugin copies the page into .gz/.br files:
+ * that plugin re-fires only for new file names, so it must see the page after the SRI edit,
+ * whichever plugin is listed first.
  *
  * Options are those of the Rollup/Vite plugin (validated in lib/options; unknown keys are rejected),
  * except that `base` defaults to output.publicPath (when it is a string other than 'auto') and
@@ -39,7 +52,7 @@ function lazyChunkDiagnostics(compilation, { reportOnly }) {
  *  - enabled, algorithm, crossorigin, strict, base, external, externalTimeout, integrityPolicy
  *
  * Unresolvable resources are webpack errors, as in the CLI and the Rollup/Vite plugin; mark a tag
- * `skip-sri` to opt it out. No import map: webpack's classic chunk loader creates <script> elements
+ * `data-skip-sri` to opt it out. No import map: webpack's classic chunk loader creates <script> elements
  * at runtime, which import maps do not govern. Use webpack-subresource-integrity for lazy chunks.
  */
 class SriWebpackPlugin {
@@ -55,7 +68,7 @@ class SriWebpackPlugin {
 
         compiler.hooks.thisCompilation.tap(PLUGIN_NAME, (compilation) => {
             compilation.hooks.processAssets.tapPromise(
-                { name: PLUGIN_NAME, stage: webpack.Compilation.PROCESS_ASSETS_STAGE_OPTIMIZE_TRANSFER },
+                { name: PLUGIN_NAME, stage: webpack.Compilation.PROCESS_ASSETS_STAGE_OPTIMIZE_TRANSFER - 1 },
                 async () => {
                     const publicPath = compilation.outputOptions.publicPath
                     const configured = typeof publicPath === 'string' && publicPath !== 'auto'

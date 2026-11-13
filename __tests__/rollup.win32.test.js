@@ -48,7 +48,8 @@ test('backslash traversal that passes the bundle-root check is stopped by the pu
   );
   expect(reads).toEqual([]);
   expect(html).not.toContain('integrity=');
-  expect(error).toMatch(/secret\.txt.*could not be found/);
+  // Backslashes are slashes to a browser, so the first is caught by the traversal check already.
+  expect(error).toMatch(/secret\.txt.*(could not be found|path traversal)/);
 });
 
 test('a publicDir file named "..foo.js" is still read under Windows separators', async () => {

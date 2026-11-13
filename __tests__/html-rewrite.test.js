@@ -78,8 +78,8 @@ describe('only the protected tags change', () => {
     expect(r.html).toMatch(/<noscript><link rel="stylesheet" href="\/n\.css" integrity="sha256-/);
   });
 
-  test('skip-sri is removed along with its leading whitespace, leaving the rest of the tag alone', async () => {
-    const r = await run('<script src="/runtime-config.js"   skip-sri  defer></script>');
+  test('data-skip-sri is removed along with its leading whitespace, leaving the rest of the tag alone', async () => {
+    const r = await run('<script src="/runtime-config.js"   data-skip-sri  defer></script>');
     expect(r.html).toBe('<script src="/runtime-config.js"  defer></script>');
   });
 

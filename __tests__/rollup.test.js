@@ -52,8 +52,8 @@ test('a missing resource fails the build, strict or not (same rule as the CLI an
   await expect(run(makeBundle(html))).rejects.toThrow(/1 resource\(s\) could not be processed[\s\S]*index\.html: The linked resource "\/assets\/missing\.js"/);
 });
 
-test('skip-sri opts a tag out, so a script the build does not own cannot fail the build', async () => {
-  const b = makeBundle('<html><head><script src="/runtime-config.js" skip-sri></script><script src="/assets/app-abc.js"></script></head></html>');
+test('data-skip-sri opts a tag out, so a script the build does not own cannot fail the build', async () => {
+  const b = makeBundle('<html><head><script src="/runtime-config.js" data-skip-sri></script><script src="/assets/app-abc.js"></script></head></html>');
   await run(b);
   expect(b['index.html'].source).toContain('<script src="/runtime-config.js"></script>');
   expect(b['index.html'].source).toContain(`integrity="${sha('console.log(1)')}"`);
@@ -517,5 +517,71 @@ describe('crossorigin option', () => {
 
   test('rejects values other than anonymous and use-credentials at configuration time', () => {
     expect(() => sriPlugin({ crossorigin: 'yes' })).toThrow(/crossorigin/);
+  });
+});
+
+describe('stylesheets a lazy chunk loads at runtime (no HTML tag, so no integrity)', () => {
+  const lazyBundle = (html) => ({
+    ...makeBundle(html),
+    'assets/Chart-abc.js': { type: 'chunk', fileName: 'assets/Chart-abc.js', code: 'x', viteMetadata: { importedCss: new Set(['assets/Chart-abc.css']) } },
+    'assets/Chart-abc.css': { type: 'asset', fileName: 'assets/Chart-abc.css', source: 'b{c:d}' },
+  });
+
+  test('warns about the lazy stylesheet and says how to fix it, without failing the build', async () => {
+    const b = lazyBundle('<html><head><script src="/assets/app-abc.js"></script></head></html>');
+    const warnings = await run(b);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/assets\/Chart-abc\.css.*loaded at runtime.*cssCodeSplit/);
+  });
+
+  test('a stylesheet the HTML links is not reported', async () => {
+    const b = lazyBundle('<html><head><link rel="stylesheet" href="/assets/Chart-abc.css"></head></html>');
+    expect(await run(b)).toEqual([]);
+  });
+});
+
+describe('Vite build manifest', () => {
+  const manifestBundle = (manifest, name = '.vite/manifest.json') => ({
+    'assets/app-abc.js': { type: 'chunk', fileName: 'assets/app-abc.js', code: 'console.log(1)' },
+    'assets/app-abc.css': { type: 'asset', fileName: 'assets/app-abc.css', source: 'a{b:c}' },
+    [name]: { type: 'asset', fileName: name, source: JSON.stringify(manifest) },
+  });
+  const MANIFEST = { 'src/main.js': { file: 'assets/app-abc.js', isEntry: true, css: ['assets/app-abc.css'] }, 'style.css': { file: 'assets/app-abc.css' } };
+  const read = (b, name = '.vite/manifest.json') => JSON.parse(b[name].source);
+
+  test('adds integrity after file for each entry, with no HTML in the build', async () => {
+    const b = manifestBundle(MANIFEST);
+    await run(b, {}, {});
+    const m = read(b);
+    expect(m['src/main.js'].integrity).toBe(sha('console.log(1)'));
+    expect(m['style.css'].integrity).toBe(sha('a{b:c}'));
+    expect(Object.keys(m['src/main.js'])).toEqual(['file', 'integrity', 'isEntry', 'css']);
+  });
+
+  test('is idempotent and refreshes a stale value', async () => {
+    const b = manifestBundle({ 'src/main.js': { file: 'assets/app-abc.js', integrity: 'sha256-STALE' } });
+    await run(b);
+    const once = b['.vite/manifest.json'].source;
+    expect(read(b)['src/main.js'].integrity).toBe(sha('console.log(1)'));
+    await run(b);
+    expect(b['.vite/manifest.json'].source).toBe(once);
+  });
+
+  test('also handles a manifest.json at the root, and skips entries whose file is not in the bundle', async () => {
+    const b = manifestBundle({ a: { file: 'assets/app-abc.js' }, gone: { file: 'assets/nope.js' } }, 'manifest.json');
+    await run(b);
+    expect(read(b, 'manifest.json').a.integrity).toBeDefined();
+    expect(read(b, 'manifest.json').gone.integrity).toBeUndefined();
+  });
+
+  test('manifest: false leaves it alone; invalid JSON only warns', async () => {
+    const b = manifestBundle(MANIFEST);
+    const before = b['.vite/manifest.json'].source;
+    await run(b, { manifest: false });
+    expect(b['.vite/manifest.json'].source).toBe(before);
+    const bad = manifestBundle({});
+    bad['.vite/manifest.json'].source = '{nope';
+    const warnings = await run(bad);
+    expect(warnings.join('\n')).toMatch(/manifest\.json is not valid JSON/);
   });
 });

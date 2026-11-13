@@ -74,6 +74,23 @@ Edge cases worth one run each:
     node /path/to/sri-injector/bin/cli.js /tmp/empty-dir ; echo $?            # ⚠️ nothing to do, exit 0
     node /path/to/sri-injector/bin/cli.js /tmp/empty-dir --strict ; echo $?   # ❌ exit 1
 
+Dry run and check (start again from the original `index.html`, without `missing.js`; add
+`<script src="/runtime-config.js" data-skip-sri></script>` to it, a file that does not exist):
+
+    snap() { find . -type f -exec stat -c '%n %Y' {} + | sort | md5sum; md5sum * | md5sum; }
+    A=$(snap)
+    node /path/to/sri-injector/bin/cli.js . --dry-run ; echo $?   # "add integrity, add crossorigin" per tag, nothing for runtime-config.js, exit 0
+    node /path/to/sri-injector/bin/cli.js . --check   ; echo $?   # ✗ missing per tag, "- skipped" for runtime-config.js, "does not appear to have been run", exit 1
+    [ "$A" = "$(snap)" ] && echo untouched                        # neither wrote or deleted anything (bytes and mtimes)
+    grep -c data-skip-sri index.html                              # still 1
+    node /path/to/sri-injector/bin/cli.js . --dry-run --check     # usage error: the two cannot be combined
+    node /path/to/sri-injector/bin/cli.js . ; grep -c data-skip-sri index.html   # exit 0, then 0: the real run removed the marker
+    node /path/to/sri-injector/bin/cli.js . --check ; echo $?
+    # ❌ exit 1: ✗ not found "/runtime-config.js" (the marker is gone, so the tag is examined like any other)
+    sed -i 's|<script src="/runtime-config.js"></script>||' index.html && node /path/to/sri-injector/bin/cli.js . --check ; echo $?   # ✅ exit 0
+    echo '/*x*/' >> app.js && node /path/to/sri-injector/bin/cli.js . --check ; echo $?
+    # ❌ exit 1: ✗ wrong "app.js", showing the stored hash and the file's actual hash
+
 ---
 
 ## 3. Manual: bundlers
