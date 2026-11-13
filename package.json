@@ -1,7 +1,7 @@
 {
   "name": "@pengdows/sri-injector",
   "version": "1.0.0",
-  "description": "Inject Subresource Integrity (integrity + crossorigin) into built HTML: CLI plus Vite, Rollup and webpack plugins.",
+  "description": "Add Subresource Integrity to any built site with one command (npx @pengdows/sri-injector ./dist), or with a Vite, Rollup or webpack plugin. Safe for CI; can prepare the Integrity-Policy header.",
   "keywords": [
     "sri",
     "subresource-integrity",
@@ -11,6 +11,9 @@
     "rollup",
     "webpack",
     "csp",
+    "cli",
+    "post-build",
+    "static-site",
     "integrity-policy",
     "microfrontend"
   ],

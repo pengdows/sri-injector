@@ -1,6 +1,14 @@
 # @pengdows/sri-injector
 
-Injects [Subresource Integrity](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity) (`integrity` + `crossorigin`) attributes into `<script>` and `<link>` tags across a build tool's HTML output.
+**Add Subresource Integrity to any built site with one command.** Point it at the folder your build produced, whatever tool made it (Astro, VitePress, Eleventy, Hugo, Vite, webpack, or a hand-written site), and it adds [`integrity` and `crossorigin`](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity) to every `<script>` and `<link>` tag it can hash:
+
+    npx @pengdows/sri-injector ./dist
+
+No bundler plugin, no config. If your bundler is Vite, Rollup or webpack, there is a plugin too, and the plugins cover things a post-build step cannot (see below).
+
+- **Safe to put in CI.** A file it cannot hash fails the run; it never silently skips one. `--dry-run` shows the edits before anything is written, and `--check` verifies an existing build without writing.
+- **It changes only what it adds.** Everything else in your HTML is written back byte for byte, and a second run changes nothing.
+- **It can prepare the `Integrity-Policy` header,** which makes browsers refuse any script without integrity, and it will not write that header while a script is uncovered.
 
 **Why this matters:** SRI is what stops a compromised script from silently running in your users' browsers. If a CDN you depend on (or a self-hosted bundle on a compromised host) is tampered with *after* you ship a page that references it, a browser checking that reference against a pinned hash refuses to load the altered file instead of executing it. That protection only exists for tags that actually carry an `integrity` attribute, so this tool puts one on every script and stylesheet tag in your built HTML where a build-time tool can. Some code never appears in the HTML at all (lazy webpack chunks, scripts your own JS inserts, workers); see [Limitations](#limitations) for what is and is not covered.
 
@@ -26,7 +34,7 @@ Injects `integrity` and `crossorigin` into local `<script src>`, `<link rel=styl
 - `rel` is matched as case-insensitive tokens, so `rel="alternate stylesheet"` counts.
 - Other preloads (`font`, `image`, `fetch`, ...) are left alone: their consumers carry no integrity, so a hash would only make the browser download the file twice.
 - A relative URL is resolved against the page's first `<base href>`, as a browser does.
-- Existing `integrity` attributes are **verified** against the actual bytes and kept if every token matches (whatever the algorithm). A stale, malformed or unsupported value is replaced and reported as a warning, since it means either the asset changed after the hash was written or something rewrote it. Running the tool twice is a no-op the second time, except for tags that had `data-skip-sri`: the first run removed the marker, so the second treats them as ordinary tags (an error if their file is not in the output).
+- Existing `integrity` attributes are **verified** against the actual bytes and kept if it holds up: for each algorithm present, at least one token matches (several tokens of one algorithm are alternatives, as in browsers). A stale, malformed or unsupported value is replaced and reported as a warning, since it means either the asset changed after the hash was written or something rewrote it. Running the tool twice is a no-op the second time, except for tags that had `data-skip-sri`: the first run removed the marker, so the second treats them as ordinary tags (an error if their file is not in the output).
 - Everything else in the page is written back exactly as it was. The CLI reads UTF-8 and single-byte pages byte for byte; UTF-16 pages are reported as errors and left unchanged.
 
 ## Tested with
