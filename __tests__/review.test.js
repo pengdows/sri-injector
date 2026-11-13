@@ -319,3 +319,37 @@ describe('second review', () => {
     expect(r.stderr).toMatch(/Warning:.*a\.js/);
   });
 });
+
+describe('import() scan is token-based', () => {
+  const scan = async (code) => {
+    write('index.html', page('<script src="main.js"></script>'));
+    write('main.js', code);
+    return new SubresourceIntegrityInjector().insertSRIInHTML(dir, 'sha384', { integrityPolicy: true });
+  };
+
+  test.each([
+    ['a double-quoted string', 'var s = "call import(name) to load"'],
+    ['a single-quoted string', "var s = 'import(\"x\")'"],
+    ['a template literal', 'var s = `use import(x) here`'],
+    ['a regex literal', 'var r = /import\\(/g'],
+    ['a string with an escaped quote', 'var s = "say \\" import(a) \\" now"'],
+  ])('import( inside %s is ignored', async (_, code) => {
+    const r = await scan(code);
+    expect(r.errors).toEqual([]);
+  });
+
+  test.each([
+    ['after a string containing import(', 'var s = "import(a)"; import(name)'],
+    ['inside a template expression', 'var s = `${import(name)}`'],
+    ['in an arrow function', 'go = () => import(name)'],
+    ['with optional-call spacing', 'import (name)'],
+  ])('a real import() %s is still reported', async (_, code) => {
+    const r = await scan(code);
+    expect(r.errors).toEqual([expect.stringMatching(/main\.js/)]);
+  });
+
+  test('code the tokenizer cannot read falls back to reporting', async () => {
+    const r = await scan('var = = = import(name) `unterminated');
+    expect(r.errors).toEqual([expect.stringMatching(/main\.js/)]);
+  });
+});

@@ -100,8 +100,8 @@ describe('manifest', () => {
     expect(tooNew).toEqual([]);
   });
 
-  test('keeps the runtime dependencies to the two it needs (HTML parser with source positions, CLI parsing)', () => {
-    expect(Object.keys(pkg.dependencies).sort()).toEqual(['commander', 'parse5']);
+  test('keeps the runtime dependencies to the three it needs (HTML parser with source positions, JS tokenizer for the import() scan, CLI parsing)', () => {
+    expect(Object.keys(pkg.dependencies).sort()).toEqual(['acorn', 'commander', 'parse5']);
   });
 
   test('the packed library and CLI never require a package that is not a runtime dependency', () => {

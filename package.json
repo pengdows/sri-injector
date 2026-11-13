@@ -72,6 +72,7 @@
     "test:browser": "jest --testPathIgnorePatterns /node_modules/ /__tests__/helpers/ /__tests__/types/ --runInBand __tests__/browser"
   },
   "dependencies": {
+    "acorn": "^8.19.0",
     "commander": "^15.1.0",
     "parse5": "^7.3.0"
   },
